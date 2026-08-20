@@ -1,4 +1,7 @@
--- NOTE: change to your own passwords for production environments
+-- Passwords are never stored in this file. At container start, psql reads
+-- POSTGRES_PASSWORD from the runtime environment / Docker secret and applies it
+-- to the role accounts below. Rotate POSTGRES_PASSWORD in your secret store
+-- (not in git) if this value was ever exposed.
 \set pgpass `echo "$POSTGRES_PASSWORD"`
 
 ALTER USER authenticator WITH PASSWORD :'pgpass';

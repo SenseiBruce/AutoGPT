@@ -41,9 +41,10 @@ flutter pub get
 
 4. **Run the app:**
 ```
-#For chromium users on linux:
-#export CHROME_EXECUTABLE=/usr/bin/chromium
-flutter run -d chrome --web-port 5000
+# Pass Firebase web config at compile time. Do not hardcode API keys.
+flutter run -d chrome --web-port 5000 \
+  --dart-define=FIREBASE_API_KEY="$FIREBASE_API_KEY" \
+  --dart-define=FIREBASE_PROJECT_ID="$FIREBASE_PROJECT_ID"
 ```
 
 ## Project Structure

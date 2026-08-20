@@ -1,0 +1,11 @@
+{
+  "name": "autogpt",
+  "private": true,
+  "description": "Root scripts for linting and testing the AutoGPT Platform frontend",
+  "scripts": {
+    "lint": "pnpm --dir autogpt_platform/frontend lint",
+    "format": "pnpm --dir autogpt_platform/frontend format",
+    "types": "pnpm --dir autogpt_platform/frontend types",
+    "test": "pnpm --dir autogpt_platform/frontend test:no-build"
+  }
+}

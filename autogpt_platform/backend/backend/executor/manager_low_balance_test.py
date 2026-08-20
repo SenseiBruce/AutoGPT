@@ -4,7 +4,7 @@ import pytest
 from prisma.enums import NotificationType
 
 from backend.data.notifications import LowBalanceData
-from backend.executor.manager import ExecutionProcessor
+from backend.executor.processor import ExecutionProcessor
 from backend.util.test import SpinTestServer
 
 
@@ -19,11 +19,11 @@ async def test_handle_low_balance_threshold_crossing(server: SpinTestServer):
 
     # Mock dependencies
     with patch(
-        "backend.executor.manager.queue_notification"
+        "backend.executor.processor.queue_notification"
     ) as mock_queue_notif, patch(
-        "backend.executor.manager.get_notification_manager_client"
+        "backend.executor.processor.get_notification_manager_client"
     ) as mock_get_client, patch(
-        "backend.executor.manager.settings"
+        "backend.executor.processor.settings"
     ) as mock_settings:
 
         # Setup mocks
@@ -78,11 +78,11 @@ async def test_handle_low_balance_no_notification_when_not_crossing(
 
     # Mock dependencies
     with patch(
-        "backend.executor.manager.queue_notification"
+        "backend.executor.processor.queue_notification"
     ) as mock_queue_notif, patch(
-        "backend.executor.manager.get_notification_manager_client"
+        "backend.executor.processor.get_notification_manager_client"
     ) as mock_get_client, patch(
-        "backend.executor.manager.settings"
+        "backend.executor.processor.settings"
     ) as mock_settings:
 
         # Setup mocks
@@ -121,11 +121,11 @@ async def test_handle_low_balance_no_duplicate_when_already_below(
 
     # Mock dependencies
     with patch(
-        "backend.executor.manager.queue_notification"
+        "backend.executor.processor.queue_notification"
     ) as mock_queue_notif, patch(
-        "backend.executor.manager.get_notification_manager_client"
+        "backend.executor.processor.get_notification_manager_client"
     ) as mock_get_client, patch(
-        "backend.executor.manager.settings"
+        "backend.executor.processor.settings"
     ) as mock_settings:
 
         # Setup mocks

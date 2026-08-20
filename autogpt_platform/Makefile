@@ -24,9 +24,9 @@ format:
 	cd frontend && pnpm lint
 
 init-env:
-	cp -n .env.default .env || true
-	cd backend && cp -n .env.default .env || true
-	cd frontend && cp -n .env.default .env || true
+	cp -n .env.example .env || cp -n .env.default .env || true
+	cd backend && (cp -n .env.example .env || cp -n .env.default .env || true)
+	cd frontend && (cp -n .env.example .env || cp -n .env.default .env || true)
 
 
 # Run migrations for backend

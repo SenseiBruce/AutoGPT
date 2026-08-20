@@ -187,10 +187,12 @@ jobs:
 
       - name: Run pytest with coverage
         run: |
+          poetry run python -m pip install pytest-cov
+          PYTEST_ARGS=(--cov=backend --cov-report=term-missing --cov-fail-under=0)
           if [[ "${{ runner.debug }}" == "1" ]]; then
-            poetry run pytest -s -vv -o log_cli=true -o log_cli_level=DEBUG
+            poetry run pytest -s -vv -o log_cli=true -o log_cli_level=DEBUG "${PYTEST_ARGS[@]}"
           else
-            poetry run pytest -s -vv
+            poetry run pytest -s -vv "${PYTEST_ARGS[@]}"
           fi
         if: success() || (failure() && steps.lint.outcome == 'failure')
         env:

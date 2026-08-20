@@ -23,10 +23,11 @@ To run the AutoGPT Platform, follow these steps:
 2. Run the following command:
 
    ```
-   cp .env.default .env
+   cp .env.example .env
    ```
 
-   This command will copy the `.env.default` file to `.env`. You can modify the `.env` file to add your own environment variables.
+   If `.env.example` is missing in an older checkout, `cp .env.default .env` also works.
+   This creates a local `.env` you can edit. Do not commit `.env`.
 
 3. Run the following command:
 

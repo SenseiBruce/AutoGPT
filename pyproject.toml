@@ -1,0 +1,30 @@
+[project]
+name = "autogpt"
+version = "0.6.22"
+description = "Build, deploy, and run continuous AI agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT AND Polyform-Shield-1.0.0" }
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+extend-exclude = [
+  "classic/benchmark/agbenchmark/challenges",
+  "classic/forge/tests/vcr_cassettes",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["autogpt_platform/backend/backend"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 0

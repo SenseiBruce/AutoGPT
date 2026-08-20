@@ -1,0 +1,32 @@
+title = "AutoGPT gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Public client configs, local supabase demo values, and documented placeholders"
+paths = [
+  '''(^|/)classic/frontend/android/app/google-services\.json$''',
+  '''(^|/)classic/frontend/web/index\.html$''',
+  '''(^|/)classic/frontend/build/web/index\.html$''',
+  '''(^|/)classic/frontend/build/web/main\.dart\.js$''',
+  '''(^|/)classic/frontend/build/web/flutter_service_worker\.js$''',
+  '''(^|/)autogpt_platform/\.env\.(default|example)$''',
+  '''(^|/)autogpt_platform/backend/\.env\.(default|example)$''',
+  '''(^|/)autogpt_platform/frontend/\.env\.(default|example)$''',
+  '''(^|/)\.env\.example$''',
+  '''(^|/)autogpt_platform/docker-compose\.platform\.yml$''',
+  '''(^|/)autogpt_platform/db/docker/docker-compose\.yml$''',
+  '''(^|/)autogpt_platform/backend/load-tests/configs/pre-authenticated-tokens\.example\.js$''',
+  '''(^|/)autogpt_platform/backend/load-tests/configs/environment\.js$''',
+  '''(^|/)autogpt_platform/autogpt_libs/autogpt_libs/auth/.*_test\.py$''',
+  '''(^|/)autogpt_platform/backend/backend/data/graph_test\.py$''',
+  '''(^|/)autogpt_platform/backend/backend/blocks/llm\.py$''',
+  '''(^|/)\.github/workflows/platform-backend-ci\.yml$''',
+  '''(^|/)docs/overrides/main\.html$''',
+]
+regexes = [
+  '''YOUR_FIREBASE_''',
+  '''REPLACE_ME''',
+  '''your-super-secret-and-long-postgres-password''',
+]

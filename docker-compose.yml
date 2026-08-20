@@ -1,0 +1,6 @@
+# Bring up the AutoGPT Platform stack (backend, frontend, postgres, redis, rabbitmq).
+# From a fresh clone:
+#   cp autogpt_platform/.env.example autogpt_platform/.env
+#   docker compose up --build
+include:
+  - path: autogpt_platform/docker-compose.yml

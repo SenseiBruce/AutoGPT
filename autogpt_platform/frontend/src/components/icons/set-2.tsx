@@ -1,0 +1,403 @@
+import * as React from "react";
+import { createIcon } from "@/components/icons/create-icon";
+
+export const IconPlay = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Play Icon"
+    {...props}
+  >
+    <polygon points="6 3 20 12 6 21 6 3" />
+  </svg>
+));
+
+/**
+ * Square icon component.
+ *
+ * @component IconSquare
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The square icon.
+ *
+ * @example
+ * // Default usage this is the standard usage
+ * <IconSquare />
+ *
+ * @example
+ * // With custom color and size these should be used sparingly and only when necessary
+ * <IconSquare className="text-primary" size="lg" />
+ *
+ * @example
+ * // With custom size and onClick handler
+ * <IconSquare size="sm" onClick={handleOnClick} />
+ */
+export const IconSquare = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Square Icon"
+    {...props}
+  >
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+  </svg>
+));
+
+/**
+ * Package2 icon component.
+ *
+ * @component IconPackage2
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The package2 icon.
+ *
+ * @example
+ * // Default usage this is the standard usage
+ * <IconPackage2 />
+ *
+ * @example
+ * // With custom color and size these should be used sparingly and only when necessary
+ * <IconPackage2 className="text-primary" size="lg" />
+ *
+ * @example
+ * // With custom size and onClick handler
+ * <IconPackage2 size="sm" onClick={handleOnClick} />
+ */
+export const IconPackage2 = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Package Icon"
+    {...props}
+  >
+    <path d="M3 9h18v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9Z" />
+    <path d="m3 9 2.45-4.9A2 2 0 0 1 7.24 3h9.52a2 2 0 0 1 1.8 1.1L21 9" />
+    <path d="M12 3v6" />
+  </svg>
+));
+
+/**
+ * Megaphone icon component.
+ *
+ * @component IconMegaphone
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The megaphone icon.
+ *
+ * @example
+ * // Default usage this is the standard usage
+ * <IconMegaphone />
+ *
+ * @example
+ * // With custom color and size these should be used sparingly and only when necessary
+ * <IconMegaphone className="text-primary" size="lg" />
+ *
+ * @example
+ * // With custom size and onClick handler
+ * <IconMegaphone size="sm" onClick={handleOnClick} />
+ */
+export const IconMegaphone = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Megaphone Icon"
+    {...props}
+  >
+    <path d="m3 11 18-5v12L3 14v-3z" />
+    <path d="M11.6 16.8a3 3 0 1 1-5.8-1.6" />
+  </svg>
+));
+
+/**
+ * Key icon component.
+ *
+ * @component IconKey
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The key icon.
+ *
+ * @example
+ * // Default usage
+ * <IconKey />
+ *
+ * @example
+ * // With custom color and size
+ * <IconKey className="text-primary" size="lg" />
+ *
+ * @example
+ * // With custom size and onClick handler
+ * <IconKey size="sm" onClick={handleOnClick} />
+ */
+export const IconKey = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Key Icon"
+    {...props}
+  >
+    <path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
+    <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" />
+  </svg>
+));
+
+/**
+ * Key(+) icon component.
+ *
+ * @component IconKeyPlus
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The key(+) icon.
+ *
+ * @example
+ * // Default usage
+ * <IconKeyPlus />
+ *
+ * @example
+ * // With custom color and size
+ * <IconKeyPlus className="text-primary" size="lg" />
+ *
+ * @example
+ * // With custom size and onClick handler
+ * <IconKeyPlus size="sm" onClick={handleOnClick} />
+ */
+export const IconKeyPlus = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Key Plus Icon"
+    {...props}
+  >
+    <path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
+    <line x1="15.6" x2="15.6" y1="5.4" y2="11.4" />
+    <line x1="12.6" x2="18.6" y1="8.4" y2="8.4" />
+  </svg>
+));
+
+/**
+ * User icon component.
+ *
+ * @component IconUser
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The user icon.
+ *
+ * @example
+ * // Default usage
+ * <IconUser />
+ *
+ * @example
+ * // With custom color and size
+ * <IconUser className="text-primary" size="lg" />
+ *
+ * @example
+ * // With custom size and onClick handler
+ * <IconUser size="sm" onClick={handleOnClick} />
+ */
+export const IconUser = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="User Icon"
+    {...props}
+  >
+    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+    <circle cx="12" cy="7" r="4" />
+  </svg>
+));
+
+/**
+ * User(+) icon component.
+ *
+ * @component IconUserPlus
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The user plus icon.
+ *
+ * @example
+ * // Default usage
+ * <IconUserPlus />
+ *
+ * @example
+ * // With custom color and size
+ * <IconUserPlus className="text-primary" size="lg" />
+ *
+ * @example
+ * // With custom size and onClick handler
+ * <IconUserPlus size="sm" onClick={handleOnClick} />
+ */
+export const IconUserPlus = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="User Plus Icon"
+    {...props}
+  >
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <line x1="19" x2="19" y1="8" y2="14" />
+    <line x1="22" x2="16" y1="11" y2="11" />
+  </svg>
+));
+
+/**
+ * Edit icon component.
+ *
+ * @component IconEdit
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The edit icon.
+ */
+export const IconEdit = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Edit Icon"
+    {...props}
+  >
+    <path d="M17 3.00006C17.2626 2.73741 17.5744 2.52907 17.9176 2.38693C18.2608 2.24479 18.6286 2.17163 19 2.17163C19.3714 2.17163 19.7392 2.24479 20.0824 2.38693C20.4256 2.52907 20.7374 2.73741 21 3.00006C21.2626 3.2627 21.471 3.57451 21.6131 3.91767C21.7553 4.26083 21.8284 4.62862 21.8284 5.00006C21.8284 5.37149 21.7553 5.73929 21.6131 6.08245C21.471 6.42561 21.2626 6.73741 21 7.00006L7.5 20.5001L2 22.0001L3.5 16.5001L17 3.00006Z" />
+  </svg>
+));
+
+/**
+ * Log out icon component.
+ *
+ * @component IconLogOut
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The log out icon.
+ */
+export const IconLogOut = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Log Out Icon"
+    {...props}
+  >
+    <path d="M9 21H5C4.46957 21 3.96086 20.7893 3.58579 20.4142C3.21071 20.0391 3 19.5304 3 19V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H9" />
+    <path d="M16 17L21 12L16 7" />
+    <path d="M21 12H9" />
+  </svg>
+));
+
+/**
+ * Log in icon component.
+ *
+ * @component IconLogIn
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The log in icon.
+ */
+export const IconLogIn = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Log In Icon"
+    {...props}
+  >
+    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+    <polyline points="10 17 15 12 10 7" />
+    <line x1="15" x2="3" y1="12" y2="12" />
+  </svg>
+));
+/**
+ * Settings icon component.
+ *
+ * @component IconSettings
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The settings icon.
+ */
+export const IconSettings = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Settings Icon"
+    {...props}
+  >
+    <path d="M12.22 2H11.78C11.2496 2 10.7409 2.21071 10.3658 2.58579C9.99072 2.96086 9.78 3.46957 9.78 4V4.18C9.77964 4.53073 9.68706 4.87519 9.51154 5.17884C9.33602 5.48248 9.08374 5.73464 8.78 5.91L8.35 6.16C8.04596 6.33554 7.70108 6.42795 7.35 6.42795C6.99893 6.42795 6.65404 6.33554 6.35 6.16L6.2 6.08C5.74107 5.81526 5.19584 5.74344 4.684 5.88031C4.17217 6.01717 3.73555 6.35154 3.47 6.81L3.25 7.19C2.98526 7.64893 2.91345 8.19416 3.05031 8.706C3.18717 9.21783 3.52154 9.65445 3.98 9.92L4.13 10.02C4.43228 10.1945 4.68362 10.4451 4.85905 10.7468C5.03448 11.0486 5.1279 11.391 5.13 11.74V12.25C5.1314 12.6024 5.03965 12.949 4.86405 13.2545C4.68844 13.5601 4.43521 13.8138 4.13 13.99L3.98 14.08C3.52154 14.3456 3.18717 14.7822 3.05031 15.294C2.91345 15.8058 2.98526 16.3511 3.25 16.81L3.47 17.19C3.73555 17.6485 4.17217 17.9828 4.684 18.1197C5.19584 18.2566 5.74107 18.1847 6.2 17.92L6.35 17.84C6.65404 17.6645 6.99893 17.5721 7.35 17.5721C7.70108 17.5721 8.04596 17.6645 8.35 17.84L8.78 18.09C9.08374 18.2654 9.33602 18.5175 9.51154 18.8212C9.68706 19.1248 9.77964 19.4693 9.78 19.82V20C9.78 20.5304 9.99072 21.0391 10.3658 21.4142C10.7409 21.7893 11.2496 22 11.78 22H12.22C12.7504 22 13.2591 21.7893 13.6342 21.4142C14.0093 21.0391 14.22 20.5304 14.22 20V19.82C14.2204 19.4693 14.3129 19.1248 14.4885 18.8212C14.664 18.5175 14.9163 18.2654 15.22 18.09L15.65 17.84C15.954 17.6645 16.2989 17.5721 16.65 17.5721C17.0011 17.5721 17.346 17.6645 17.65 17.84L17.8 17.92C18.2589 18.1847 18.8042 18.2566 19.316 18.1197C19.8278 17.9828 20.2645 17.6485 20.53 17.19L20.75 16.8C21.0147 16.3411 21.0866 15.7958 20.9497 15.284C20.8128 14.7722 20.4785 14.3356 20.02 14.07L19.87 13.99C19.5648 13.8138 19.3116 13.5601 19.136 13.2545C18.9604 12.949 18.8686 12.6024 18.87 12.25V11.75C18.8686 11.3976 18.9604 11.051 19.136 10.7455C19.3116 10.4399 19.5648 10.1862 19.87 10.01L20.02 9.92C20.4785 9.65445 20.8128 9.21783 20.9497 8.706C21.0866 8.19416 21.0147 7.64893 20.75 7.19L20.53 6.81C20.2645 6.35154 19.8278 6.01717 19.316 5.88031C18.8042 5.74344 18.2589 5.81526 17.8 6.08L17.65 6.16C17.346 6.33554 17.0011 6.42795 16.65 6.42795C16.2989 6.42795 15.954 6.33554 15.65 6.16L15.22 5.91C14.9163 5.73464 14.664 5.48248 14.4885 5.17884C14.3129 4.87519 14.2204 4.53073 14.22 4.18V4C14.22 3.46957 14.0093 2.96086 13.6342 2.58579C13.2591 2.21071 12.7504 2 12.22 2Z" />
+    <path d="M12 15C13.6569 15 15 13.6569 15 12C15 10.3431 13.6569 9 12 9C10.3431 9 9 10.3431 9 12C9 13.6569 10.3431 15 12 15Z" />
+  </svg>
+));
+
+/**
+ * Dashboard layout icon component.
+ *
+ * @component IconLayoutDashboard
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The dashboard layout icon.
+ */
+export const IconLayoutDashboard = createIcon((props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    aria-label="Dashboard Layout Icon"
+    {...props}
+  >
+    <path d="M10 3H3V12H10V3Z" />
+    <path d="M21 3H14V8H21V3Z" />
+    <path d="M21 12H14V21H21V12Z" />
+    <path d="M10 16H3V21H10V16Z" />
+  </svg>
+));
+
+/**
+ * Upload cloud icon component.
+ *
+ * @component IconUploadCloud
+ * @param {IconProps} props - The props object containing additional attributes and event handlers for the icon.
+ * @returns {JSX.Element} - The upload cloud icon.
+ */

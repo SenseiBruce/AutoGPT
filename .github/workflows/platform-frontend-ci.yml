@@ -82,6 +82,9 @@ jobs:
       - name: Run lint
         run: pnpm lint
 
+      - name: Run typecheck
+        run: pnpm types
+
   chromatic:
     runs-on: ubuntu-latest
     needs: setup

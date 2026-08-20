@@ -24,13 +24,34 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(
     options: const FirebaseOptions(
-      apiKey: 'AIzaSyBvYLAK_A0uhFuVPQbTxUdVWbb_Lsur9cg',
-      authDomain: 'prod-auto-gpt.firebaseapp.com',
-      projectId: 'prod-auto-gpt',
-      storageBucket: 'prod-auto-gpt.appspot.com',
-      messagingSenderId: '387936576242',
-      appId: '1:387936576242:web:7536e0c50dd81b4dd7a66b',
-      measurementId: 'G-8PRS69JJRL',
+      apiKey: String.fromEnvironment(
+        'FIREBASE_API_KEY',
+        defaultValue: 'YOUR_FIREBASE_WEB_API_KEY',
+      ),
+      authDomain: String.fromEnvironment(
+        'FIREBASE_AUTH_DOMAIN',
+        defaultValue: 'your-project.firebaseapp.com',
+      ),
+      projectId: String.fromEnvironment(
+        'FIREBASE_PROJECT_ID',
+        defaultValue: 'your-project-id',
+      ),
+      storageBucket: String.fromEnvironment(
+        'FIREBASE_STORAGE_BUCKET',
+        defaultValue: 'your-project.appspot.com',
+      ),
+      messagingSenderId: String.fromEnvironment(
+        'FIREBASE_MESSAGING_SENDER_ID',
+        defaultValue: '000000000000',
+      ),
+      appId: String.fromEnvironment(
+        'FIREBASE_APP_ID',
+        defaultValue: '1:000000000000:web:replace-me',
+      ),
+      measurementId: String.fromEnvironment(
+        'FIREBASE_MEASUREMENT_ID',
+        defaultValue: 'G-XXXXXXXXXX',
+      ),
     ),
   );
 

@@ -1,0 +1,24 @@
+{
+  "name": "AutoGPT Platform",
+  "dockerComposeFile": ["../docker-compose.yml"],
+  "service": "rest_server",
+  "workspaceFolder": "/app",
+  "shutdownAction": "stopCompose",
+  "forwardPorts": [3000, 8006, 5432, 6379, 5672],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "python.testing.pytestEnabled": true,
+        "python.testing.unittestEnabled": false
+      },
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "esbenp.prettier-vscode",
+        "dbaeumer.vscode-eslint"
+      ]
+    }
+  },
+  "postCreateCommand": "cp -n autogpt_platform/.env.example autogpt_platform/.env || true; cp -n autogpt_platform/backend/.env.example autogpt_platform/backend/.env || true; cp -n autogpt_platform/frontend/.env.example autogpt_platform/frontend/.env || true"
+}

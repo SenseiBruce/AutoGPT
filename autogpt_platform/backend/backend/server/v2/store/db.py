@@ -27,6 +27,7 @@ from backend.data.notifications import (
     NotificationEventModel,
 )
 from backend.notifications.notifications import queue_notification_async
+from backend.server.v2.store.search import build_store_agent_search_query
 from backend.util.exceptions import DatabaseError
 from backend.util.settings import Settings
 
@@ -58,94 +59,22 @@ async def get_store_agents(
     try:
         # If search_query is provided, use full-text search
         if search_query:
-            offset = (page - 1) * page_size
-
-            # Whitelist allowed order_by columns
-            ALLOWED_ORDER_BY = {
-                "rating": "rating DESC, rank DESC",
-                "runs": "runs DESC, rank DESC",
-                "name": "agent_name ASC, rank ASC",
-                "updated_at": "updated_at DESC, rank DESC",
-            }
-
-            # Validate and get order clause
-            if sorted_by and sorted_by in ALLOWED_ORDER_BY:
-                order_by_clause = ALLOWED_ORDER_BY[sorted_by]
-            else:
-                order_by_clause = "updated_at DESC, rank DESC"
-
-            # Build WHERE conditions and parameters list
-            where_parts: list[str] = []
-            params: list[typing.Any] = [search_query]  # $1 - search term
-            param_index = 2  # Start at $2 for next parameter
-
-            # Always filter for available agents
-            where_parts.append("is_available = true")
-
-            if featured:
-                where_parts.append("featured = true")
-
-            if creators and creators:
-                # Use ANY with array parameter
-                where_parts.append(f"creator_username = ANY(${param_index})")
-                params.append(creators)
-                param_index += 1
-
-            if category and category:
-                where_parts.append(f"${param_index} = ANY(categories)")
-                params.append(category)
-                param_index += 1
-
-            sql_where_clause: str = " AND ".join(where_parts) if where_parts else "1=1"
-
-            # Add pagination params
-            params.extend([page_size, offset])
-            limit_param = f"${param_index}"
-            offset_param = f"${param_index + 1}"
-
-            # Execute full-text search query with parameterized values
-            sql_query = f"""
-                SELECT
-                    slug,
-                    agent_name,
-                    agent_image,
-                    creator_username,
-                    creator_avatar,
-                    sub_heading,
-                    description,
-                    runs,
-                    rating,
-                    categories,
-                    featured,
-                    is_available,
-                    updated_at,
-                    ts_rank_cd(search, query) AS rank
-                FROM "StoreAgent",
-                    plainto_tsquery('english', $1) AS query
-                WHERE {sql_where_clause}
-                    AND search @@ query
-                ORDER BY {order_by_clause}
-                LIMIT {limit_param} OFFSET {offset_param}
-            """
-
-            # Count query for pagination - only uses search term parameter
-            count_query = f"""
-                SELECT COUNT(*) as count
-                FROM "StoreAgent",
-                    plainto_tsquery('english', $1) AS query
-                WHERE {sql_where_clause}
-                    AND search @@ query
-            """
-
-            # Execute both queries with parameters
-            agents = await prisma.client.get_client().query_raw(
-                typing.cast(typing.LiteralString, sql_query), *params
+            fts = build_store_agent_search_query(
+                search_query,
+                featured=featured,
+                creators=creators,
+                sorted_by=sorted_by,
+                category=category,
+                page=page,
+                page_size=page_size,
             )
 
-            # For count, use params without pagination (last 2 params)
-            count_params = params[:-2]
+            agents = await prisma.client.get_client().query_raw(
+                typing.cast(typing.LiteralString, fts.sql), *fts.params
+            )
+
             count_result = await prisma.client.get_client().query_raw(
-                typing.cast(typing.LiteralString, count_query), *count_params
+                typing.cast(typing.LiteralString, fts.count_sql), *fts.count_params
             )
 
             total = count_result[0]["count"] if count_result else 0

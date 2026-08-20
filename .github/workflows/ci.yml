@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [master, dev, ci-test*]
+  pull_request:
+  merge_group:
+
+concurrency:
+  group: ${{ format('ci-{0}', github.head_ref && format('{0}-{1}', github.event_name, github.event.pull_request.number) || github.sha) }}
+  cancel-in-progress: ${{ startsWith(github.event_name, 'pull_request') }}
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Ruff
+        run: pip install ruff
+      - name: Run ruff check
+        run: ruff check autogpt_platform/backend/backend/server/v2/store/search.py tests
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install pytest and coverage
+        run: pip install pytest pytest-cov
+      - name: Run pytest with coverage
+        env:
+          PYTHONPATH: autogpt_platform/backend
+        run: |
+          pytest tests \
+            --cov=backend.server.v2.store.search \
+            --cov-report=term \
+            --cov-fail-under=60

@@ -13,9 +13,63 @@
 [Русский](https://zdoc.app/ru/Significant-Gravitas/AutoGPT) | 
 [中文](https://zdoc.app/zh/Significant-Gravitas/AutoGPT)
 
-**AutoGPT** is a powerful platform that allows you to create, deploy, and manage continuous AI agents that automate complex workflows. 
+**AutoGPT** is a powerful platform that allows you to create, deploy, and manage continuous AI agents that automate complex workflows.
 
-## Hosting Options 
+## Install, build, and test (fresh clone)
+
+These commands are the supported local path. They do not require the remote installer.
+
+```bash
+git clone https://github.com/Significant-Gravitas/AutoGPT.git
+cd AutoGPT
+cp autogpt_platform/.env.example autogpt_platform/.env
+cp autogpt_platform/backend/.env.example autogpt_platform/backend/.env
+cp autogpt_platform/frontend/.env.example autogpt_platform/frontend/.env
+```
+
+Start the full stack (Postgres, Redis, RabbitMQ, backend, frontend) in Docker:
+
+```bash
+docker compose up --build
+```
+
+The frontend is served at `http://localhost:3000`. Backend health: `http://localhost:8006/health`.
+
+Run the repository test suite (no Docker required for this subset):
+
+```bash
+python3 -m pip install pytest pytest-cov ruff
+python3 -m pytest tests
+```
+
+Platform backend tests (Poetry, from `autogpt_platform/backend`):
+
+```bash
+poetry install
+poetry run pytest --cov=backend --cov-report=term
+poetry run lint
+```
+
+Platform frontend lint, typecheck, and Playwright tests (from `autogpt_platform/frontend`):
+
+```bash
+pnpm install --frozen-lockfile
+pnpm lint
+pnpm types
+pnpm test:no-build
+```
+
+CI runs lint and pytest on every push (`.github/workflows/ci.yml`) and the package-specific workflows under `.github/workflows/`.
+
+### Environment
+
+Copy the example env files before Compose. Do not commit `.env`.
+
+- `autogpt_platform/.env.example` — Supabase / shared stack
+- `autogpt_platform/backend/.env.example` — backend (`DATABASE_URL`, `REDIS_HOST`, `OPENAI_API_KEY`, …)
+- `autogpt_platform/frontend/.env.example` — Next.js public vars
+
+## How to Self-Host the AutoGPT Platform
    - Download to self-host (Free!)
    - [Join the Waitlist](https://bit.ly/3ZDijAI) for the cloud-hosted beta (Closed Beta - Public release Coming Soon!)
 

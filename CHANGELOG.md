@@ -11,10 +11,10 @@ All notable changes to this repository are documented in this file.
 - Root `pytest` suite (`tests/`) and GitHub Actions `ci.yml` that run lint and tests on every push.
 - Gitleaks secret scan workflow (`.github/workflows/secret-scan.yml`).
 - Store full-text search query builder (`backend/server/v2/store/search.py`) with unit tests.
-- Split oversized backend modules into focused files:
-  - `blocks/llm_models.py`, `blocks/llm_call.py`, `blocks/llm_blocks.py`
-  - `server/v2/store/db_agents.py`, `server/v2/store/db_submissions.py`
-  - `blocks/google/gmail_models.py`, `blocks/google/gmail_mime.py`, `blocks/google/gmail_blocks.py`
+- Split oversized backend modules into focused files under 1000 LOC:
+  - LLM: `llm_models.py`, `llm_call.py`, `llm_base.py`, `llm_structured.py`, `llm_text_blocks.py`
+  - Store: `db_agents.py`, `db_submissions.py`, `db_profiles_admin.py`, `search.py`
+  - Gmail: `gmail_models.py`, `gmail_mime.py`, `gmail_base.py`, `gmail_mail.py`, `gmail_thread.py`
 - Frontend icons split into focused modules under `src/components/icons/`.
 
 ### Security

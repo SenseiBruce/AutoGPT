@@ -1,0 +1,805 @@
+"""Store submission, profile, and admin database operations."""
+
+import asyncio
+import logging
+from datetime import datetime, timezone
+
+import fastapi
+import prisma.enums
+import prisma.errors
+import prisma.models
+import prisma.types
+
+import backend.server.v2.store.exceptions
+import backend.server.v2.store.model
+from backend.data.db import transaction
+from backend.data.graph import (
+    GraphModel,
+    get_graph,
+    get_graph_as_admin,
+    get_sub_graphs,
+)
+from backend.data.includes import AGENT_GRAPH_INCLUDE
+from backend.data.notifications import (
+    AgentApprovalData,
+    AgentRejectionData,
+    NotificationEventModel,
+)
+from backend.notifications.notifications import queue_notification_async
+from backend.util.exceptions import DatabaseError
+from backend.util.settings import Settings
+
+logger = logging.getLogger(__name__)
+settings = Settings()
+
+DEFAULT_ADMIN_NAME = "AutoGPT Admin"
+DEFAULT_ADMIN_EMAIL = "admin@autogpt.co"
+
+async def get_user_profile(
+    user_id: str,
+) -> backend.server.v2.store.model.ProfileDetails | None:
+    logger.debug(f"Getting user profile for {user_id}")
+
+    try:
+        profile = await prisma.models.Profile.prisma().find_first(
+            where={"userId": user_id}
+        )
+
+        if not profile:
+            return None
+        return backend.server.v2.store.model.ProfileDetails(
+            name=profile.name,
+            username=profile.username,
+            description=profile.description,
+            links=profile.links,
+            avatar_url=profile.avatarUrl,
+        )
+    except Exception as e:
+        logger.error(f"Error getting user profile: {e}")
+        raise DatabaseError("Failed to get user profile") from e
+
+
+async def update_profile(
+    user_id: str, profile: backend.server.v2.store.model.Profile
+) -> backend.server.v2.store.model.CreatorDetails:
+    """
+    Update the store profile for a user or create a new one if it doesn't exist.
+    Args:
+        user_id: ID of the authenticated user
+        profile: Updated profile details
+    Returns:
+        CreatorDetails: The updated or created profile details
+    Raises:
+        DatabaseError: If there's an issue updating or creating the profile
+    """
+    logger.info(f"Updating profile for user {user_id} with data: {profile}")
+    try:
+        # Sanitize username to allow only letters, numbers, and hyphens
+        username = "".join(
+            c if c.isalpha() or c == "-" or c.isnumeric() else ""
+            for c in profile.username
+        ).lower()
+        # Check if profile exists for the given user_id
+        existing_profile = await prisma.models.Profile.prisma().find_first(
+            where={"userId": user_id}
+        )
+        if not existing_profile:
+            raise backend.server.v2.store.exceptions.ProfileNotFoundError(
+                f"Profile not found for user {user_id}. This should not be possible."
+            )
+
+        # Verify that the user is authorized to update this profile
+        if existing_profile.userId != user_id:
+            logger.error(
+                f"Unauthorized update attempt for profile {existing_profile.id} by user {user_id}"
+            )
+            raise DatabaseError(
+                f"Unauthorized update attempt for profile {existing_profile.id} by user {user_id}"
+            )
+
+        logger.debug(f"Updating existing profile for user {user_id}")
+        # Prepare update data, only including non-None values
+        update_data = {}
+        if profile.name is not None:
+            update_data["name"] = profile.name
+        if profile.username is not None:
+            update_data["username"] = username
+        if profile.description is not None:
+            update_data["description"] = profile.description
+        if profile.links is not None:
+            update_data["links"] = profile.links
+        if profile.avatar_url is not None:
+            update_data["avatarUrl"] = profile.avatar_url
+
+        # Update the existing profile
+        updated_profile = await prisma.models.Profile.prisma().update(
+            where={"id": existing_profile.id},
+            data=prisma.types.ProfileUpdateInput(**update_data),
+        )
+        if updated_profile is None:
+            logger.error(f"Failed to update profile for user {user_id}")
+            raise DatabaseError("Failed to update profile")
+
+        return backend.server.v2.store.model.CreatorDetails(
+            name=updated_profile.name,
+            username=updated_profile.username,
+            description=updated_profile.description,
+            links=updated_profile.links,
+            avatar_url=updated_profile.avatarUrl or "",
+            agent_rating=0.0,
+            agent_runs=0,
+            top_categories=[],
+        )
+
+    except prisma.errors.PrismaError as e:
+        logger.error(f"Database error updating profile: {e}")
+        raise DatabaseError("Failed to update profile") from e
+
+
+async def get_my_agents(
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> backend.server.v2.store.model.MyAgentsResponse:
+    """Get the agents for the authenticated user"""
+    logger.debug(f"Getting my agents for user {user_id}, page={page}")
+
+    try:
+        search_filter: prisma.types.LibraryAgentWhereInput = {
+            "userId": user_id,
+            "AgentGraph": {
+                "is": {
+                    "StoreListings": {
+                        "none": {
+                            "isDeleted": False,
+                            "Versions": {
+                                "some": {
+                                    "isAvailable": True,
+                                }
+                            },
+                        }
+                    }
+                }
+            },
+            "isArchived": False,
+            "isDeleted": False,
+        }
+
+        library_agents = await prisma.models.LibraryAgent.prisma().find_many(
+            where=search_filter,
+            order=[{"updatedAt": "desc"}],
+            skip=(page - 1) * page_size,
+            take=page_size,
+            include={"AgentGraph": True},
+        )
+
+        total = await prisma.models.LibraryAgent.prisma().count(where=search_filter)
+        total_pages = (total + page_size - 1) // page_size
+
+        my_agents = [
+            backend.server.v2.store.model.MyAgent(
+                agent_id=graph.id,
+                agent_version=graph.version,
+                agent_name=graph.name or "",
+                last_edited=graph.updatedAt or graph.createdAt,
+                description=graph.description or "",
+                agent_image=library_agent.imageUrl,
+                recommended_schedule_cron=graph.recommendedScheduleCron,
+            )
+            for library_agent in library_agents
+            if (graph := library_agent.AgentGraph)
+        ]
+
+        return backend.server.v2.store.model.MyAgentsResponse(
+            agents=my_agents,
+            pagination=backend.server.v2.store.model.Pagination(
+                current_page=page,
+                total_items=total,
+                total_pages=total_pages,
+                page_size=page_size,
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error getting my agents: {e}")
+        raise DatabaseError("Failed to fetch my agents") from e
+
+
+async def get_agent(store_listing_version_id: str) -> GraphModel:
+    """Get agent using the version ID and store listing version ID."""
+    store_listing_version = (
+        await prisma.models.StoreListingVersion.prisma().find_unique(
+            where={"id": store_listing_version_id}
+        )
+    )
+
+    if not store_listing_version:
+        raise ValueError(f"Store listing version {store_listing_version_id} not found")
+
+    graph = await get_graph(
+        graph_id=store_listing_version.agentGraphId,
+        version=store_listing_version.agentGraphVersion,
+        for_export=True,
+    )
+    if not graph:
+        raise ValueError(
+            f"Agent {store_listing_version.agentGraphId} v{store_listing_version.agentGraphVersion} not found"
+        )
+
+    return graph
+
+
+#####################################################
+################## ADMIN FUNCTIONS ##################
+#####################################################
+
+
+async def _approve_sub_agent(
+    tx,
+    sub_graph: prisma.models.AgentGraph,
+    main_agent_name: str,
+    main_agent_version: int,
+    main_agent_user_id: str,
+) -> None:
+    """Approve a single sub-agent by creating/updating store listings as needed"""
+    heading = f"Sub-agent of {main_agent_name} v{main_agent_version}"
+
+    # Find existing listing for this sub-agent
+    listing = await prisma.models.StoreListing.prisma(tx).find_first(
+        where={"agentGraphId": sub_graph.id, "isDeleted": False},
+        include={"Versions": True},
+    )
+
+    # Early return: Create new listing if none exists
+    if not listing:
+        await prisma.models.StoreListing.prisma(tx).create(
+            data=prisma.types.StoreListingCreateInput(
+                slug=f"sub-agent-{sub_graph.id[:8]}",
+                agentGraphId=sub_graph.id,
+                agentGraphVersion=sub_graph.version,
+                owningUserId=main_agent_user_id,
+                hasApprovedVersion=True,
+                Versions={
+                    "create": [
+                        _create_sub_agent_version_data(
+                            sub_graph, heading, main_agent_name
+                        )
+                    ]
+                },
+            )
+        )
+        return
+
+    # Find version matching this sub-graph
+    matching_version = next(
+        (
+            v
+            for v in listing.Versions or []
+            if v.agentGraphId == sub_graph.id
+            and v.agentGraphVersion == sub_graph.version
+        ),
+        None,
+    )
+
+    # Early return: Approve existing version if found and not already approved
+    if matching_version:
+        if matching_version.submissionStatus == prisma.enums.SubmissionStatus.APPROVED:
+            return  # Already approved, nothing to do
+
+        await prisma.models.StoreListingVersion.prisma(tx).update(
+            where={"id": matching_version.id},
+            data={
+                "submissionStatus": prisma.enums.SubmissionStatus.APPROVED,
+                "reviewedAt": datetime.now(tz=timezone.utc),
+            },
+        )
+        await prisma.models.StoreListing.prisma(tx).update(
+            where={"id": listing.id}, data={"hasApprovedVersion": True}
+        )
+        return
+
+    # Create new version if no matching version found
+    next_version = max((v.version for v in listing.Versions or []), default=0) + 1
+    await prisma.models.StoreListingVersion.prisma(tx).create(
+        data={
+            **_create_sub_agent_version_data(sub_graph, heading, main_agent_name),
+            "version": next_version,
+            "storeListingId": listing.id,
+        }
+    )
+    await prisma.models.StoreListing.prisma(tx).update(
+        where={"id": listing.id}, data={"hasApprovedVersion": True}
+    )
+
+
+def _create_sub_agent_version_data(
+    sub_graph: prisma.models.AgentGraph, heading: str, main_agent_name: str
+) -> prisma.types.StoreListingVersionCreateInput:
+    """Create store listing version data for a sub-agent"""
+    return prisma.types.StoreListingVersionCreateInput(
+        agentGraphId=sub_graph.id,
+        agentGraphVersion=sub_graph.version,
+        name=sub_graph.name or heading,
+        submissionStatus=prisma.enums.SubmissionStatus.APPROVED,
+        subHeading=heading,
+        description=(
+            f"{heading}: {sub_graph.description}" if sub_graph.description else heading
+        ),
+        changesSummary=f"Auto-approved as sub-agent of {main_agent_name}",
+        isAvailable=False,
+        submittedAt=datetime.now(tz=timezone.utc),
+        imageUrls=[],  # Sub-agents don't need images
+        categories=[],  # Sub-agents don't need categories
+    )
+
+
+async def review_store_submission(
+    store_listing_version_id: str,
+    is_approved: bool,
+    external_comments: str,
+    internal_comments: str,
+    reviewer_id: str,
+) -> backend.server.v2.store.model.StoreSubmission:
+    """Review a store listing submission as an admin."""
+    try:
+        store_listing_version = (
+            await prisma.models.StoreListingVersion.prisma().find_unique(
+                where={"id": store_listing_version_id},
+                include={
+                    "StoreListing": True,
+                    "AgentGraph": {"include": {**AGENT_GRAPH_INCLUDE, "User": True}},
+                    "Reviewer": True,
+                },
+            )
+        )
+
+        if not store_listing_version or not store_listing_version.StoreListing:
+            raise fastapi.HTTPException(
+                status_code=404,
+                detail=f"Store listing version {store_listing_version_id} not found",
+            )
+
+        # Check if we're rejecting an already approved agent
+        is_rejecting_approved = (
+            not is_approved
+            and store_listing_version.submissionStatus
+            == prisma.enums.SubmissionStatus.APPROVED
+        )
+
+        # If approving, update the listing to indicate it has an approved version
+        if is_approved and store_listing_version.AgentGraph:
+            async with transaction() as tx:
+                # Handle sub-agent approvals in transaction
+                await asyncio.gather(
+                    *[
+                        _approve_sub_agent(
+                            tx,
+                            sub_graph,
+                            store_listing_version.name,
+                            store_listing_version.agentGraphVersion,
+                            store_listing_version.StoreListing.owningUserId,
+                        )
+                        for sub_graph in await get_sub_graphs(
+                            store_listing_version.AgentGraph
+                        )
+                    ]
+                )
+
+                # Update the AgentGraph with store listing data
+                await prisma.models.AgentGraph.prisma().update(
+                    where={
+                        "graphVersionId": {
+                            "id": store_listing_version.agentGraphId,
+                            "version": store_listing_version.agentGraphVersion,
+                        }
+                    },
+                    data={
+                        "name": store_listing_version.name,
+                        "description": store_listing_version.description,
+                        "recommendedScheduleCron": store_listing_version.recommendedScheduleCron,
+                        "instructions": store_listing_version.instructions,
+                    },
+                )
+
+                await prisma.models.StoreListing.prisma(tx).update(
+                    where={"id": store_listing_version.StoreListing.id},
+                    data={
+                        "hasApprovedVersion": True,
+                        "ActiveVersion": {"connect": {"id": store_listing_version_id}},
+                    },
+                )
+
+        # If rejecting an approved agent, update the StoreListing accordingly
+        if is_rejecting_approved:
+            # Check if there are other approved versions
+            other_approved = (
+                await prisma.models.StoreListingVersion.prisma().find_first(
+                    where={
+                        "storeListingId": store_listing_version.StoreListing.id,
+                        "id": {"not": store_listing_version_id},
+                        "submissionStatus": prisma.enums.SubmissionStatus.APPROVED,
+                    }
+                )
+            )
+
+            if not other_approved:
+                # No other approved versions, update hasApprovedVersion to False
+                await prisma.models.StoreListing.prisma().update(
+                    where={"id": store_listing_version.StoreListing.id},
+                    data={
+                        "hasApprovedVersion": False,
+                        "ActiveVersion": {"disconnect": True},
+                    },
+                )
+            else:
+                # Set the most recent other approved version as active
+                await prisma.models.StoreListing.prisma().update(
+                    where={"id": store_listing_version.StoreListing.id},
+                    data={
+                        "ActiveVersion": {"connect": {"id": other_approved.id}},
+                    },
+                )
+
+        submission_status = (
+            prisma.enums.SubmissionStatus.APPROVED
+            if is_approved
+            else prisma.enums.SubmissionStatus.REJECTED
+        )
+
+        # Update the version with review information
+        update_data: prisma.types.StoreListingVersionUpdateInput = {
+            "submissionStatus": submission_status,
+            "reviewComments": external_comments,
+            "internalComments": internal_comments,
+            "Reviewer": {"connect": {"id": reviewer_id}},
+            "StoreListing": {"connect": {"id": store_listing_version.StoreListing.id}},
+            "reviewedAt": datetime.now(tz=timezone.utc),
+        }
+
+        # Update the version
+        submission = await prisma.models.StoreListingVersion.prisma().update(
+            where={"id": store_listing_version_id},
+            data=update_data,
+            include={"StoreListing": True},
+        )
+
+        if not submission:
+            raise DatabaseError(
+                f"Failed to update store listing version {store_listing_version_id}"
+            )
+
+        # Send email notification to the agent creator
+        if store_listing_version.AgentGraph and store_listing_version.AgentGraph.User:
+            agent_creator = store_listing_version.AgentGraph.User
+            reviewer = (
+                store_listing_version.Reviewer
+                if store_listing_version.Reviewer
+                else None
+            )
+
+            try:
+                base_url = (
+                    settings.config.frontend_base_url
+                    or settings.config.platform_base_url
+                )
+
+                if is_approved:
+                    store_agent = (
+                        await prisma.models.StoreAgent.prisma().find_first_or_raise(
+                            where={"storeListingVersionId": submission.id}
+                        )
+                    )
+
+                    # Send approval notification
+                    notification_data = AgentApprovalData(
+                        agent_name=submission.name,
+                        agent_id=submission.agentGraphId,
+                        agent_version=submission.agentGraphVersion,
+                        reviewer_name=(
+                            reviewer.name
+                            if reviewer and reviewer.name
+                            else DEFAULT_ADMIN_NAME
+                        ),
+                        reviewer_email=(
+                            reviewer.email if reviewer else DEFAULT_ADMIN_EMAIL
+                        ),
+                        comments=external_comments,
+                        reviewed_at=submission.reviewedAt
+                        or datetime.now(tz=timezone.utc),
+                        store_url=f"{base_url}/marketplace/agent/{store_agent.creator_username}/{store_agent.slug}",
+                    )
+
+                    notification_event = NotificationEventModel[AgentApprovalData](
+                        user_id=agent_creator.id,
+                        type=prisma.enums.NotificationType.AGENT_APPROVED,
+                        data=notification_data,
+                    )
+                else:
+                    # Send rejection notification
+                    notification_data = AgentRejectionData(
+                        agent_name=submission.name,
+                        agent_id=submission.agentGraphId,
+                        agent_version=submission.agentGraphVersion,
+                        reviewer_name=(
+                            reviewer.name
+                            if reviewer and reviewer.name
+                            else DEFAULT_ADMIN_NAME
+                        ),
+                        reviewer_email=(
+                            reviewer.email if reviewer else DEFAULT_ADMIN_EMAIL
+                        ),
+                        comments=external_comments,
+                        reviewed_at=submission.reviewedAt
+                        or datetime.now(tz=timezone.utc),
+                        resubmit_url=f"{base_url}/build?flowID={submission.agentGraphId}",
+                    )
+
+                    notification_event = NotificationEventModel[AgentRejectionData](
+                        user_id=agent_creator.id,
+                        type=prisma.enums.NotificationType.AGENT_REJECTED,
+                        data=notification_data,
+                    )
+
+                # Queue the notification for immediate sending
+                await queue_notification_async(notification_event)
+                logger.info(
+                    f"Queued {'approval' if is_approved else 'rejection'} notification for user {agent_creator.id} and agent {submission.name}"
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to send email notification for agent review: {e}")
+                # Don't fail the review process if email sending fails
+                pass
+
+        # Convert to Pydantic model for consistency
+        return backend.server.v2.store.model.StoreSubmission(
+            agent_id=submission.agentGraphId,
+            agent_version=submission.agentGraphVersion,
+            name=submission.name,
+            sub_heading=submission.subHeading,
+            slug=(
+                submission.StoreListing.slug
+                if hasattr(submission, "storeListing") and submission.StoreListing
+                else ""
+            ),
+            description=submission.description,
+            instructions=submission.instructions,
+            image_urls=submission.imageUrls or [],
+            date_submitted=submission.submittedAt or submission.createdAt,
+            status=submission.submissionStatus,
+            runs=0,  # Default values since we don't have this data here
+            rating=0.0,
+            store_listing_version_id=submission.id,
+            reviewer_id=submission.reviewerId,
+            review_comments=submission.reviewComments,
+            internal_comments=submission.internalComments,
+            reviewed_at=submission.reviewedAt,
+            changes_summary=submission.changesSummary,
+        )
+
+    except Exception as e:
+        logger.error(f"Could not create store submission review: {e}")
+        raise DatabaseError("Failed to create store submission review") from e
+
+
+async def get_admin_listings_with_versions(
+    status: prisma.enums.SubmissionStatus | None = None,
+    search_query: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> backend.server.v2.store.model.StoreListingsWithVersionsResponse:
+    """
+    Get store listings for admins with all their versions.
+
+    Args:
+        status: Filter by submission status (PENDING, APPROVED, REJECTED)
+        search_query: Search by name, description, or user email
+        page: Page number for pagination
+        page_size: Number of items per page
+
+    Returns:
+        StoreListingsWithVersionsResponse with listings and their versions
+    """
+    logger.debug(
+        f"Getting admin store listings with status={status}, search={search_query}, page={page}"
+    )
+
+    try:
+        # Build the where clause for StoreListing
+        where_dict: prisma.types.StoreListingWhereInput = {
+            "isDeleted": False,
+        }
+        if status:
+            where_dict["Versions"] = {"some": {"submissionStatus": status}}
+
+        if search_query:
+            # Find users with matching email
+            matching_users = await prisma.models.User.prisma().find_many(
+                where={"email": {"contains": search_query, "mode": "insensitive"}},
+            )
+
+            user_ids = [user.id for user in matching_users]
+
+            # Set up OR conditions
+            where_dict["OR"] = [
+                {"slug": {"contains": search_query, "mode": "insensitive"}},
+                {
+                    "Versions": {
+                        "some": {
+                            "name": {"contains": search_query, "mode": "insensitive"}
+                        }
+                    }
+                },
+                {
+                    "Versions": {
+                        "some": {
+                            "description": {
+                                "contains": search_query,
+                                "mode": "insensitive",
+                            }
+                        }
+                    }
+                },
+                {
+                    "Versions": {
+                        "some": {
+                            "subHeading": {
+                                "contains": search_query,
+                                "mode": "insensitive",
+                            }
+                        }
+                    }
+                },
+            ]
+
+            # Add user_id condition if any users matched
+            if user_ids:
+                where_dict["OR"].append({"owningUserId": {"in": user_ids}})
+
+        # Calculate pagination
+        skip = (page - 1) * page_size
+
+        # Create proper Prisma types for the query
+        where = prisma.types.StoreListingWhereInput(**where_dict)
+        include = prisma.types.StoreListingInclude(
+            Versions=prisma.types.FindManyStoreListingVersionArgsFromStoreListing(
+                order_by=prisma.types._StoreListingVersion_version_OrderByInput(
+                    version="desc"
+                )
+            ),
+            OwningUser=True,
+        )
+
+        # Query listings with their versions
+        listings = await prisma.models.StoreListing.prisma().find_many(
+            where=where,
+            skip=skip,
+            take=page_size,
+            include=include,
+            order=[{"createdAt": "desc"}],
+        )
+
+        # Get total count for pagination
+        total = await prisma.models.StoreListing.prisma().count(where=where)
+        total_pages = (total + page_size - 1) // page_size
+
+        # Convert to response models
+        listings_with_versions = []
+        for listing in listings:
+            versions: list[backend.server.v2.store.model.StoreSubmission] = []
+            # If we have versions, turn them into StoreSubmission models
+            for version in listing.Versions or []:
+                version_model = backend.server.v2.store.model.StoreSubmission(
+                    agent_id=version.agentGraphId,
+                    agent_version=version.agentGraphVersion,
+                    name=version.name,
+                    sub_heading=version.subHeading,
+                    slug=listing.slug,
+                    description=version.description,
+                    instructions=version.instructions,
+                    image_urls=version.imageUrls or [],
+                    date_submitted=version.submittedAt or version.createdAt,
+                    status=version.submissionStatus,
+                    runs=0,  # Default values since we don't have this data here
+                    rating=0.0,  # Default values since we don't have this data here
+                    store_listing_version_id=version.id,
+                    reviewer_id=version.reviewerId,
+                    review_comments=version.reviewComments,
+                    internal_comments=version.internalComments,
+                    reviewed_at=version.reviewedAt,
+                    changes_summary=version.changesSummary,
+                    version=version.version,
+                )
+                versions.append(version_model)
+
+            # Get the latest version (first in the sorted list)
+            latest_version = versions[0] if versions else None
+
+            creator_email = listing.OwningUser.email if listing.OwningUser else None
+
+            listing_with_versions = (
+                backend.server.v2.store.model.StoreListingWithVersions(
+                    listing_id=listing.id,
+                    slug=listing.slug,
+                    agent_id=listing.agentGraphId,
+                    agent_version=listing.agentGraphVersion,
+                    active_version_id=listing.activeVersionId,
+                    has_approved_version=listing.hasApprovedVersion,
+                    creator_email=creator_email,
+                    latest_version=latest_version,
+                    versions=versions,
+                )
+            )
+
+            listings_with_versions.append(listing_with_versions)
+
+        logger.debug(f"Found {len(listings_with_versions)} listings for admin")
+        return backend.server.v2.store.model.StoreListingsWithVersionsResponse(
+            listings=listings_with_versions,
+            pagination=backend.server.v2.store.model.Pagination(
+                current_page=page,
+                total_items=total,
+                total_pages=total_pages,
+                page_size=page_size,
+            ),
+        )
+    except Exception as e:
+        logger.error(f"Error fetching admin store listings: {e}")
+        # Return empty response rather than exposing internal errors
+        return backend.server.v2.store.model.StoreListingsWithVersionsResponse(
+            listings=[],
+            pagination=backend.server.v2.store.model.Pagination(
+                current_page=page,
+                total_items=0,
+                total_pages=0,
+                page_size=page_size,
+            ),
+        )
+
+
+async def check_submission_already_approved(
+    store_listing_version_id: str,
+) -> bool:
+    """Check the submission status of a store listing version."""
+    try:
+        store_listing_version = (
+            await prisma.models.StoreListingVersion.prisma().find_unique(
+                where={"id": store_listing_version_id}
+            )
+        )
+        if not store_listing_version:
+            return False
+        return (
+            store_listing_version.submissionStatus
+            == prisma.enums.SubmissionStatus.APPROVED
+        )
+    except Exception as e:
+        logger.error(f"Error checking submission status: {e}")
+        return False
+
+
+async def get_agent_as_admin(
+    user_id: str | None,
+    store_listing_version_id: str,
+) -> GraphModel:
+    """Get agent using the version ID and store listing version ID."""
+    store_listing_version = (
+        await prisma.models.StoreListingVersion.prisma().find_unique(
+            where={"id": store_listing_version_id}
+        )
+    )
+
+    if not store_listing_version:
+        raise ValueError(f"Store listing version {store_listing_version_id} not found")
+
+    graph = await get_graph_as_admin(
+        user_id=user_id,
+        graph_id=store_listing_version.agentGraphId,
+        version=store_listing_version.agentGraphVersion,
+        for_export=True,
+    )
+    if not graph:
+        raise ValueError(
+            f"Agent {store_listing_version.agentGraphId} v{store_listing_version.agentGraphVersion} not found"
+        )
+
+    return graph

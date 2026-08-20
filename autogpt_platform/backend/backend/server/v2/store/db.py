@@ -18,21 +18,23 @@ from backend.server.v2.store.db_agents import (
     fetch_store_agents_via_prisma,
     fetch_store_agents_via_search,
 )
-from backend.server.v2.store.db_submissions import (  # noqa: F401
+from backend.server.v2.store.db_profiles_admin import (  # noqa: F401
     check_submission_already_approved,
+    get_admin_listings_with_versions,
+    get_agent,
+    get_agent_as_admin,
+    get_my_agents,
+    get_user_profile,
+    review_store_submission,
+    update_profile,
+)
+from backend.server.v2.store.db_submissions import (  # noqa: F401
     create_store_review,
     create_store_submission,
     create_store_version,
     delete_store_submission,
     edit_store_submission,
-    get_admin_listings_with_versions,
-    get_agent,
-    get_agent_as_admin,
-    get_my_agents,
     get_store_submissions,
-    get_user_profile,
-    review_store_submission,
-    update_profile,
 )
 from backend.util.exceptions import DatabaseError
 from backend.util.settings import Settings

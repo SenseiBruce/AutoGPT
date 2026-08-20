@@ -21,7 +21,7 @@ jobs:
       - name: Install Ruff
         run: pip install ruff
       - name: Run ruff check
-        run: ruff check autogpt_platform/backend/backend/server/v2/store/search.py tests
+        run: ruff check autogpt_platform/backend/backend tests
 
   test:
     runs-on: ubuntu-latest
@@ -36,7 +36,60 @@ jobs:
         env:
           PYTHONPATH: autogpt_platform/backend
         run: |
-          pytest tests \
-            --cov=backend.server.v2.store.search \
+          pytest tests autogpt_platform/backend/backend/server/v2/store \
+            --cov=backend \
             --cov-report=term \
-            --cov-fail-under=60
+            --cov-fail-under=40
+
+  frontend-lint-typecheck:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: autogpt_platform/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+      - name: Enable corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run frontend lint
+        run: pnpm lint
+      - name: Run frontend typecheck
+        run: pnpm types
+
+  audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install Poetry and pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install poetry pip-audit
+      - name: Export backend dependencies and audit
+        working-directory: autogpt_platform/backend
+        run: |
+          poetry export -f requirements.txt --without-hashes --output /tmp/backend-requirements.txt
+          pip-audit -r /tmp/backend-requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+      - name: Enable corepack
+        working-directory: autogpt_platform/frontend
+        run: corepack enable
+      - name: Install frontend dependencies
+        working-directory: autogpt_platform/frontend
+        run: pnpm install --frozen-lockfile
+      - name: Audit frontend production dependencies
+        working-directory: autogpt_platform/frontend
+        run: pnpm audit --prod

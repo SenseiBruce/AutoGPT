@@ -1,0 +1,814 @@
+"""Concrete user credit implementations and helpers."""
+
+import logging
+from abc import ABC, abstractmethod
+from collections import defaultdict
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, cast
+
+import stripe
+from prisma.enums import (
+    CreditRefundRequestStatus,
+    CreditTransactionType,
+    NotificationType,
+    OnboardingStep,
+)
+from prisma.errors import UniqueViolationError
+from prisma.models import CreditRefundRequest, CreditTransaction, User, UserBalance
+from prisma.types import CreditRefundRequestCreateInput, CreditTransactionWhereInput
+from pydantic import BaseModel
+
+from backend.data.block_cost_config import BLOCK_COSTS
+from backend.data.db import query_raw_with_schema
+from backend.data.includes import MAX_CREDIT_REFUND_REQUESTS_FETCH
+from backend.data.model import (
+    AutoTopUpConfig,
+    RefundRequest,
+    TopUpType,
+    TransactionHistory,
+    UserTransaction,
+)
+from backend.data.notifications import NotificationEventModel, RefundRequestData
+from backend.data.user import get_user_by_id, get_user_email_by_id
+from backend.notifications.notifications import queue_notification_async
+from backend.server.v2.admin.model import UserHistoryResponse
+from backend.util.exceptions import InsufficientBalanceError
+from backend.util.feature_flag import Flag, is_feature_enabled
+from backend.util.json import SafeJson, dumps
+from backend.util.models import Pagination
+from backend.util.retry import func_retry
+from backend.util.settings import Settings
+
+from .credit_base import (
+    POSTGRES_INT_MAX,
+    POSTGRES_INT_MIN,
+    UsageTransactionMetadata,
+    UserCreditBase,
+    base_url,
+    settings,
+)
+
+if TYPE_CHECKING:
+    from backend.data.block import Block, BlockCost
+
+stripe.api_key = settings.secrets.stripe_api_key
+logger = logging.getLogger(__name__)
+
+class UserCredit(UserCreditBase):
+
+    async def _send_refund_notification(
+        self,
+        notification_request: RefundRequestData,
+        notification_type: NotificationType,
+    ):
+        await queue_notification_async(
+            NotificationEventModel(
+                user_id=notification_request.user_id,
+                type=notification_type,
+                data=notification_request,
+            )
+        )
+
+    async def spend_credits(
+        self,
+        user_id: str,
+        cost: int,
+        metadata: UsageTransactionMetadata,
+    ) -> int:
+        if cost == 0:
+            return 0
+
+        balance, _ = await self._add_transaction(
+            user_id=user_id,
+            amount=-cost,
+            transaction_type=CreditTransactionType.USAGE,
+            metadata=SafeJson(metadata.model_dump()),
+        )
+
+        # Auto top-up if balance is below threshold.
+        auto_top_up = await get_auto_top_up(user_id)
+        if auto_top_up.threshold and balance < auto_top_up.threshold:
+            try:
+                await self._top_up_credits(
+                    user_id=user_id,
+                    amount=auto_top_up.amount,
+                    # Avoid multiple auto top-ups within the same graph execution.
+                    key=f"AUTO-TOP-UP-{user_id}-{metadata.graph_exec_id}",
+                    ceiling_balance=auto_top_up.threshold,
+                    top_up_type=TopUpType.AUTO,
+                )
+            except Exception as e:
+                # Failed top-up is not critical, we can move on.
+                logger.error(
+                    f"Auto top-up failed for user {user_id}, balance: {balance}, amount: {auto_top_up.amount}, error: {e}"
+                )
+
+        return balance
+
+    async def top_up_credits(
+        self,
+        user_id: str,
+        amount: int,
+        top_up_type: TopUpType = TopUpType.UNCATEGORIZED,
+    ):
+        await self._top_up_credits(
+            user_id=user_id, amount=amount, top_up_type=top_up_type
+        )
+
+    async def onboarding_reward(self, user_id: str, credits: int, step: OnboardingStep):
+        try:
+            await self._add_transaction(
+                user_id=user_id,
+                amount=credits,
+                transaction_type=CreditTransactionType.GRANT,
+                transaction_key=f"REWARD-{user_id}-{step.value}",
+                metadata=SafeJson(
+                    {"reason": f"Reward for completing {step.value} onboarding step."}
+                ),
+            )
+            return True
+        except UniqueViolationError:
+            # User already received this reward
+            return False
+
+    async def top_up_refund(
+        self, user_id: str, transaction_key: str, metadata: dict[str, str]
+    ) -> int:
+        transaction = await CreditTransaction.prisma().find_first_or_raise(
+            where={
+                "transactionKey": transaction_key,
+                "userId": user_id,
+                "isActive": True,
+                "type": CreditTransactionType.TOP_UP,
+            }
+        )
+        balance = await self.get_credits(user_id)
+        amount = transaction.amount
+        refund_key_format = settings.config.refund_request_time_key_format
+        refund_key = f"{transaction.createdAt.strftime(refund_key_format)}-{user_id}"
+
+        try:
+            refund_request = await CreditRefundRequest.prisma().create(
+                data=CreditRefundRequestCreateInput(
+                    id=refund_key,
+                    transactionKey=transaction_key,
+                    userId=user_id,
+                    amount=amount,
+                    reason=metadata.get("reason", ""),
+                    status=CreditRefundRequestStatus.PENDING,
+                    result="The refund request is under review.",
+                )
+            )
+        except UniqueViolationError:
+            raise ValueError(
+                "Unable to request a refund for this transaction, the request of the top-up transaction within the same week has already been made."
+            )
+
+        if amount - balance > settings.config.refund_credit_tolerance_threshold:
+            user_data = await get_user_by_id(user_id)
+            await self._send_refund_notification(
+                RefundRequestData(
+                    user_id=user_id,
+                    user_name=user_data.name or "AutoGPT Platform User",
+                    user_email=user_data.email,
+                    transaction_id=transaction_key,
+                    refund_request_id=refund_request.id,
+                    reason=refund_request.reason,
+                    amount=amount,
+                    balance=balance,
+                ),
+                NotificationType.REFUND_REQUEST,
+            )
+            return 0  # Register the refund request for manual approval.
+
+        # Auto refund the top-up.
+        refund = stripe.Refund.create(payment_intent=transaction_key, metadata=metadata)
+        return refund.amount
+
+    async def deduct_credits(self, request: stripe.Refund | stripe.Dispute):
+        if isinstance(request, stripe.Refund) and request.status != "succeeded":
+            logger.warning(
+                f"Skip processing refund #{request.id} with status {request.status}"
+            )
+            return
+
+        if isinstance(request, stripe.Dispute) and request.status != "lost":
+            logger.warning(
+                f"Skip processing dispute #{request.id} with status {request.status}"
+            )
+            return
+
+        transaction = await CreditTransaction.prisma().find_first_or_raise(
+            where={
+                "transactionKey": str(request.payment_intent),
+                "isActive": True,
+                "type": CreditTransactionType.TOP_UP,
+            }
+        )
+        if request.amount <= 0 or request.amount > transaction.amount:
+            raise AssertionError(
+                f"Invalid amount to deduct ${request.amount/100} from ${transaction.amount/100} top-up"
+            )
+
+        balance, _ = await self._add_transaction(
+            user_id=transaction.userId,
+            amount=-request.amount,
+            transaction_type=CreditTransactionType.REFUND,
+            transaction_key=request.id,
+            metadata=SafeJson(request),
+            fail_insufficient_credits=False,
+        )
+
+        # Update the result of the refund request if it exists.
+        await CreditRefundRequest.prisma().update_many(
+            where={
+                "userId": transaction.userId,
+                "transactionKey": transaction.transactionKey,
+            },
+            data={
+                "amount": request.amount,
+                "status": CreditRefundRequestStatus.APPROVED,
+                "result": "The refund request has been approved, the amount will be credited back to your account.",
+            },
+        )
+
+        user_data = await get_user_by_id(transaction.userId)
+        await self._send_refund_notification(
+            RefundRequestData(
+                user_id=user_data.id,
+                user_name=user_data.name or "AutoGPT Platform User",
+                user_email=user_data.email,
+                transaction_id=transaction.transactionKey,
+                refund_request_id=request.id,
+                reason=str(request.reason or "-"),
+                amount=transaction.amount,
+                balance=balance,
+            ),
+            NotificationType.REFUND_PROCESSED,
+        )
+
+    async def handle_dispute(self, dispute: stripe.Dispute):
+        transaction = await CreditTransaction.prisma().find_first_or_raise(
+            where={
+                "transactionKey": str(dispute.payment_intent),
+                "isActive": True,
+                "type": CreditTransactionType.TOP_UP,
+            }
+        )
+        user_id = transaction.userId
+        amount = dispute.amount
+        balance = await self.get_credits(user_id)
+
+        # If the user has enough balance, just let them win the dispute.
+        if balance - amount >= settings.config.refund_credit_tolerance_threshold:
+            logger.warning(f"Accepting dispute from {user_id} for ${amount/100}")
+            dispute.close()
+            return
+
+        logger.warning(
+            f"Adding extra info for dispute from {user_id} for ${amount/100}"
+        )
+        # Retrieve recent transaction history to support our evidence.
+        # This provides a concise timeline that shows service usage and proper credit application.
+        transaction_history = await self.get_transaction_history(
+            user_id, transaction_count_limit=None
+        )
+        user = await get_user_by_id(user_id)
+
+        # Build a comprehensive explanation message that includes:
+        # - Confirmation that the top-up transaction was processed and credits were applied.
+        # - A summary of recent transaction history.
+        # - An explanation that the funds were used to render the agreed service.
+        evidence_text = (
+            f"The top-up transaction of ${transaction.amount / 100:.2f} was processed successfully, and the corresponding credits "
+            "were applied to the user’s account. Our records confirm that the funds were utilized for the intended services. "
+            "Below is a summary of recent transaction activity:\n"
+        )
+        for tx in transaction_history.transactions:
+            if tx.transaction_key == transaction.transactionKey:
+                additional_comment = (
+                    " [This top-up transaction is the subject of the dispute]."
+                )
+            else:
+                additional_comment = ""
+
+            evidence_text += (
+                f"- {tx.description}: Amount ${tx.amount / 100:.2f} on {tx.transaction_time.isoformat()}, "
+                f"resulting balance ${tx.running_balance / 100:.2f} {additional_comment}\n"
+            )
+        evidence_text += (
+            "\nThis evidence demonstrates that the transaction was authorized and that the charged amount was used to render the service as agreed."
+            "\nAdditionally, we provide an automated refund functionality, so the user could have used it if they were not satisfied with the service. "
+        )
+        evidence: stripe.Dispute.ModifyParamsEvidence = {
+            "product_description": "AutoGPT Platform Credits",
+            "customer_email_address": user.email,
+            "uncategorized_text": evidence_text[:20000],
+        }
+        stripe.Dispute.modify(dispute.id, evidence=evidence)
+
+    async def _top_up_credits(
+        self,
+        user_id: str,
+        amount: int,
+        key: str | None = None,
+        ceiling_balance: int | None = None,
+        top_up_type: TopUpType = TopUpType.UNCATEGORIZED,
+        metadata: dict | None = None,
+    ):
+        # init metadata, without sharing it with the world
+        metadata = metadata or {}
+        if not metadata.get("reason"):
+            match top_up_type:
+                case TopUpType.MANUAL:
+                    metadata["reason"] = {"reason": f"Top up credits for {user_id}"}
+                case TopUpType.AUTO:
+                    metadata["reason"] = {
+                        "reason": f"Auto top up credits for {user_id}"
+                    }
+                case _:
+                    metadata["reason"] = {
+                        "reason": f"Top up reason unknown for {user_id}"
+                    }
+
+        if amount < 0:
+            raise ValueError(f"Top up amount must not be negative: {amount}")
+
+        if key is not None and (
+            await CreditTransaction.prisma().find_first(
+                where={"transactionKey": key, "userId": user_id}
+            )
+        ):
+            raise ValueError(f"Transaction key {key} already exists for user {user_id}")
+
+        if amount == 0:
+            transaction_type = CreditTransactionType.CARD_CHECK
+        else:
+            transaction_type = CreditTransactionType.TOP_UP
+
+        _, transaction_key = await self._add_transaction(
+            user_id=user_id,
+            amount=amount,
+            transaction_type=transaction_type,
+            is_active=False,
+            transaction_key=key,
+            ceiling_balance=ceiling_balance,
+            metadata=(SafeJson(metadata)),
+        )
+
+        customer_id = await get_stripe_customer_id(user_id)
+
+        payment_methods = stripe.PaymentMethod.list(customer=customer_id, type="card")
+        if not payment_methods:
+            raise ValueError("No payment method found, please add it on the platform.")
+
+        successful_transaction = None
+        new_transaction_key = None
+        for payment_method in payment_methods:
+            if transaction_type == CreditTransactionType.CARD_CHECK:
+                setup_intent = stripe.SetupIntent.create(
+                    customer=customer_id,
+                    usage="off_session",
+                    confirm=True,
+                    payment_method=payment_method.id,
+                    automatic_payment_methods={
+                        "enabled": True,
+                        "allow_redirects": "never",
+                    },
+                )
+                if setup_intent.status == "succeeded":
+                    successful_transaction = SafeJson({"setup_intent": setup_intent})
+                    new_transaction_key = setup_intent.id
+                    break
+            else:
+                payment_intent = stripe.PaymentIntent.create(
+                    amount=amount,
+                    currency="usd",
+                    description="AutoGPT Platform Credits",
+                    customer=customer_id,
+                    off_session=True,
+                    confirm=True,
+                    payment_method=payment_method.id,
+                    automatic_payment_methods={
+                        "enabled": True,
+                        "allow_redirects": "never",
+                    },
+                )
+                if payment_intent.status == "succeeded":
+                    successful_transaction = SafeJson(
+                        {"payment_intent": payment_intent}
+                    )
+                    new_transaction_key = payment_intent.id
+                    break
+
+        if not successful_transaction:
+            raise ValueError(
+                f"Out of {len(payment_methods)} payment methods tried, none is supported"
+            )
+
+        await self._enable_transaction(
+            transaction_key=transaction_key,
+            new_transaction_key=new_transaction_key,
+            user_id=user_id,
+            metadata=successful_transaction,
+        )
+
+    async def top_up_intent(self, user_id: str, amount: int) -> str:
+        if amount < 500 or amount % 100 != 0:
+            raise ValueError(
+                f"Top up amount must be at least 500 credits and multiple of 100 but is {amount}"
+            )
+
+        # Create checkout session
+        # https://docs.stripe.com/checkout/quickstart?client=react
+        # unit_amount param is always in the smallest currency unit (so cents for usd)
+        # which is equal to amount of credits
+        checkout_session = stripe.checkout.Session.create(
+            customer=await get_stripe_customer_id(user_id),
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": "usd",
+                        "product_data": {
+                            "name": "AutoGPT Platform Credits",
+                        },
+                        "unit_amount": amount,
+                    },
+                    "quantity": 1,
+                }
+            ],
+            mode="payment",
+            ui_mode="hosted",
+            payment_intent_data={"setup_future_usage": "off_session"},
+            saved_payment_method_options={"payment_method_save": "enabled"},
+            success_url=base_url + "/profile/credits?topup=success",
+            cancel_url=base_url + "/profile/credits?topup=cancel",
+            allow_promotion_codes=True,
+        )
+
+        await self._add_transaction(
+            user_id=user_id,
+            amount=amount,
+            transaction_type=CreditTransactionType.TOP_UP,
+            transaction_key=checkout_session.id,
+            is_active=False,
+            metadata=SafeJson(checkout_session),
+        )
+
+        return checkout_session.url or ""
+
+    # https://docs.stripe.com/checkout/fulfillment
+    async def fulfill_checkout(
+        self, *, session_id: str | None = None, user_id: str | None = None
+    ):
+        if (not session_id and not user_id) or (session_id and user_id):
+            raise ValueError("Either session_id or user_id must be provided")
+
+        # Retrieve CreditTransaction
+        find_filter: CreditTransactionWhereInput = {
+            "type": CreditTransactionType.TOP_UP,
+            "isActive": False,
+            "amount": {"gt": 0},
+        }
+        if session_id:
+            find_filter["transactionKey"] = session_id
+        if user_id:
+            find_filter["userId"] = user_id
+
+        # Find the most recent inactive top-up transaction
+        credit_transaction = await CreditTransaction.prisma().find_first(
+            where=find_filter,
+            order={"createdAt": "desc"},
+        )
+
+        # This can be called multiple times for one id, so ignore if already fulfilled
+        if not credit_transaction:
+            return
+
+        # If the transaction is not a checkout session, then skip the fulfillment
+        if not credit_transaction.transactionKey.startswith("cs_"):
+            return
+
+        # Retrieve the Checkout Session from the API
+        checkout_session = stripe.checkout.Session.retrieve(
+            credit_transaction.transactionKey,
+            expand=["payment_intent"],
+        )
+
+        # Check the Checkout Session's payment_status property
+        # to determine if fulfillment should be performed
+        if checkout_session.payment_status in ["paid", "no_payment_required"]:
+            if payment_intent := checkout_session.payment_intent:
+                assert isinstance(payment_intent, stripe.PaymentIntent)
+                new_transaction_key = payment_intent.id
+            else:
+                new_transaction_key = None
+
+            await self._enable_transaction(
+                transaction_key=credit_transaction.transactionKey,
+                new_transaction_key=new_transaction_key,
+                user_id=credit_transaction.userId,
+                metadata=SafeJson(checkout_session),
+            )
+
+    async def get_credits(self, user_id: str) -> int:
+        balance, _ = await self._get_credits(user_id)
+        return balance
+
+    async def get_transaction_history(
+        self,
+        user_id: str,
+        transaction_count_limit: int | None = 100,
+        transaction_time_ceiling: datetime | None = None,
+        transaction_type: str | None = None,
+    ) -> TransactionHistory:
+        transactions_filter: CreditTransactionWhereInput = {
+            "userId": user_id,
+            "isActive": True,
+        }
+        if transaction_time_ceiling:
+            transaction_time_ceiling = transaction_time_ceiling.replace(
+                tzinfo=timezone.utc
+            )
+            transactions_filter["createdAt"] = {"lt": transaction_time_ceiling}
+        if transaction_type:
+            transactions_filter["type"] = CreditTransactionType[transaction_type]
+        transactions = await CreditTransaction.prisma().find_many(
+            where=transactions_filter,
+            order={"createdAt": "desc"},
+            take=transaction_count_limit,
+        )
+
+        # doesn't fill current_balance, reason, user_email, admin_email, or extra_data
+        grouped_transactions: dict[str, UserTransaction] = defaultdict(
+            lambda: UserTransaction(user_id=user_id)
+        )
+        tx_time = None
+        for t in transactions:
+            metadata = (
+                UsageTransactionMetadata.model_validate(t.metadata)
+                if t.metadata
+                else UsageTransactionMetadata()
+            )
+            tx_time = t.createdAt.replace(tzinfo=timezone.utc)
+
+            if t.type == CreditTransactionType.USAGE and metadata.graph_exec_id:
+                gt = grouped_transactions[metadata.graph_exec_id]
+                gid = metadata.graph_id[:8] if metadata.graph_id else "UNKNOWN"
+                gt.description = f"Graph #{gid} Execution"
+
+                gt.usage_node_count += 1
+                gt.usage_start_time = min(gt.usage_start_time, tx_time)
+                gt.usage_execution_id = metadata.graph_exec_id
+                gt.usage_graph_id = metadata.graph_id
+            else:
+                gt = grouped_transactions[t.transactionKey]
+                gt.description = f"{t.type} Transaction"
+                gt.transaction_key = t.transactionKey
+
+            gt.amount += t.amount
+            gt.transaction_type = t.type
+
+            if tx_time > gt.transaction_time:
+                gt.transaction_time = tx_time
+                gt.running_balance = t.runningBalance or 0
+
+        return TransactionHistory(
+            transactions=list(grouped_transactions.values()),
+            next_transaction_time=(
+                tx_time if len(transactions) == transaction_count_limit else None
+            ),
+        )
+
+    async def get_refund_requests(
+        self, user_id: str, limit: int = MAX_CREDIT_REFUND_REQUESTS_FETCH
+    ) -> list[RefundRequest]:
+        return [
+            RefundRequest(
+                id=r.id,
+                user_id=r.userId,
+                transaction_key=r.transactionKey,
+                amount=r.amount,
+                reason=r.reason,
+                result=r.result,
+                status=r.status,
+                created_at=r.createdAt,
+                updated_at=r.updatedAt,
+            )
+            for r in await CreditRefundRequest.prisma().find_many(
+                where={"userId": user_id},
+                order={"createdAt": "desc"},
+                take=limit,
+            )
+        ]
+
+
+class BetaUserCredit(UserCredit):
+    """
+    This is a temporary class to handle the test user utilizing monthly credit refill.
+    TODO: Remove this class & its feature toggle.
+    """
+
+    def __init__(self, num_user_credits_refill: int):
+        self.num_user_credits_refill = num_user_credits_refill
+
+    async def get_credits(self, user_id: str) -> int:
+        cur_time = self.time_now().date()
+        balance, snapshot_time = await self._get_credits(user_id)
+        if (snapshot_time.year, snapshot_time.month) == (cur_time.year, cur_time.month):
+            return balance
+
+        try:
+            balance, _ = await self._add_transaction(
+                user_id=user_id,
+                amount=max(self.num_user_credits_refill - balance, 0),
+                transaction_type=CreditTransactionType.GRANT,
+                transaction_key=f"MONTHLY-CREDIT-TOP-UP-{cur_time}",
+                metadata=SafeJson({"reason": "Monthly credit refill"}),
+            )
+            return balance
+        except UniqueViolationError:
+            # Already refilled this month
+            return (await self._get_credits(user_id))[0]
+
+
+class DisabledUserCredit(UserCreditBase):
+    async def get_credits(self, *args, **kwargs) -> int:
+        return 100
+
+    async def get_transaction_history(self, *args, **kwargs) -> TransactionHistory:
+        return TransactionHistory(transactions=[], next_transaction_time=None)
+
+    async def get_refund_requests(self, *args, **kwargs) -> list[RefundRequest]:
+        return []
+
+    async def spend_credits(self, *args, **kwargs) -> int:
+        return 0
+
+    async def top_up_credits(self, *args, **kwargs):
+        pass
+
+    async def onboarding_reward(self, *args, **kwargs) -> bool:
+        return True
+
+    async def top_up_intent(self, *args, **kwargs) -> str:
+        return ""
+
+    async def top_up_refund(self, *args, **kwargs) -> int:
+        return 0
+
+    async def deduct_credits(self, *args, **kwargs):
+        pass
+
+    async def handle_dispute(self, *args, **kwargs):
+        pass
+
+    async def fulfill_checkout(self, *args, **kwargs):
+        pass
+
+
+async def get_user_credit_model(user_id: str) -> UserCreditBase:
+    """
+    Get the credit model for a user, considering LaunchDarkly flags.
+
+    Args:
+        user_id (str): The user ID to check flags for.
+
+    Returns:
+        UserCreditBase: The appropriate credit model for the user
+    """
+    if not settings.config.enable_credit:
+        return DisabledUserCredit()
+
+    # Check LaunchDarkly flag for payment pilot users
+    # Default to False (beta monthly credit behavior) to maintain current behavior
+    is_payment_enabled = await is_feature_enabled(
+        Flag.ENABLE_PLATFORM_PAYMENT, user_id, default=False
+    )
+
+    if is_payment_enabled:
+        # Payment enabled users get UserCredit (no monthly refills, enable payments)
+        return UserCredit()
+    else:
+        # Default behavior: users get beta monthly credits
+        return BetaUserCredit(settings.config.num_user_credits_refill)
+
+
+def get_block_costs() -> dict[str, list["BlockCost"]]:
+    return {block().id: costs for block, costs in BLOCK_COSTS.items()}
+
+
+def get_block_cost(block: "Block") -> list["BlockCost"]:
+    return BLOCK_COSTS.get(block.__class__, [])
+
+
+async def get_stripe_customer_id(user_id: str) -> str:
+    user = await get_user_by_id(user_id)
+
+    if user.stripe_customer_id:
+        return user.stripe_customer_id
+
+    customer = stripe.Customer.create(
+        name=user.name or "",
+        email=user.email,
+        metadata={"user_id": user_id},
+    )
+    await User.prisma().update(
+        where={"id": user_id}, data={"stripeCustomerId": customer.id}
+    )
+    return customer.id
+
+
+async def set_auto_top_up(user_id: str, config: AutoTopUpConfig):
+    await User.prisma().update(
+        where={"id": user_id},
+        data={"topUpConfig": SafeJson(config.model_dump())},
+    )
+
+
+async def get_auto_top_up(user_id: str) -> AutoTopUpConfig:
+    user = await get_user_by_id(user_id)
+
+    if not user.top_up_config:
+        return AutoTopUpConfig(threshold=0, amount=0)
+
+    return AutoTopUpConfig.model_validate(user.top_up_config)
+
+
+async def admin_get_user_history(
+    page: int = 1,
+    page_size: int = 20,
+    search: str | None = None,
+    transaction_filter: CreditTransactionType | None = None,
+) -> UserHistoryResponse:
+
+    if page < 1 or page_size < 1:
+        raise ValueError("Invalid pagination input")
+
+    where_clause: CreditTransactionWhereInput = {}
+    if transaction_filter:
+        where_clause["type"] = transaction_filter
+    if search:
+        where_clause["OR"] = [
+            {"userId": {"contains": search, "mode": "insensitive"}},
+            {"User": {"is": {"email": {"contains": search, "mode": "insensitive"}}}},
+            {"User": {"is": {"name": {"contains": search, "mode": "insensitive"}}}},
+        ]
+    transactions = await CreditTransaction.prisma().find_many(
+        where=where_clause,
+        skip=(page - 1) * page_size,
+        take=page_size,
+        include={"User": True},
+        order={"createdAt": "desc"},
+    )
+    total = await CreditTransaction.prisma().count(where=where_clause)
+    total_pages = (total + page_size - 1) // page_size
+
+    history = []
+    for tx in transactions:
+        admin_id = ""
+        admin_email = ""
+        reason = ""
+
+        metadata: dict = cast(dict, tx.metadata) or {}
+
+        if metadata:
+            admin_id = metadata.get("admin_id")
+            admin_email = (
+                (await get_user_email_by_id(admin_id) or f"Unknown Admin: {admin_id}")
+                if admin_id
+                else ""
+            )
+            reason = metadata.get("reason", "No reason provided")
+
+        user_credit_model = await get_user_credit_model(tx.userId)
+        balance, _ = await user_credit_model._get_credits(tx.userId)
+
+        history.append(
+            UserTransaction(
+                transaction_key=tx.transactionKey,
+                transaction_time=tx.createdAt,
+                transaction_type=tx.type,
+                amount=tx.amount,
+                current_balance=balance,
+                running_balance=tx.runningBalance or 0,
+                user_id=tx.userId,
+                user_email=(
+                    tx.User.email
+                    if tx.User
+                    else (await get_user_by_id(tx.userId)).email
+                ),
+                reason=reason,
+                admin_email=admin_email,
+                extra_data=str(metadata),
+            )
+        )
+    return UserHistoryResponse(
+        history=history,
+        pagination=Pagination(
+            total_items=total,
+            total_pages=total_pages,
+            current_page=page,
+            page_size=page_size,
+        ),
+    )

@@ -66,42 +66,13 @@ import {
 import { InformationTooltip } from "@/components/molecules/InformationTooltip/InformationTooltip";
 import { Switch } from "@/components/atoms/Switch/Switch";
 
-export type ConnectionData = Array<{
-  edge_id: string;
-  source: string;
-  sourceHandle: string;
-  target: string;
-  targetHandle: string;
-}>;
-
-export type CustomNodeData = {
-  blockType: string;
-  blockCosts: BlockCost[];
-  title: string;
-  description: string;
-  categories: Category[];
-  inputSchema: BlockIORootSchema;
-  outputSchema: BlockIORootSchema;
-  hardcodedValues: { [key: string]: any };
-  connections: ConnectionData;
-  isOutputOpen: boolean;
-  status?: NodeExecutionResult["status"];
-  /** executionResults contains outputs across multiple executions
-   * with the last element being the most recent output */
-  executionResults?: {
-    execId: string;
-    data: NodeExecutionResult["output_data"];
-    status: NodeExecutionResult["status"];
-  }[];
-  block_id: string;
-  backend_id?: string;
-  errors?: { [key: string]: string };
-  isOutputStatic?: boolean;
-  uiType: BlockUIType;
-  metadata?: { [key: string]: any };
-};
-
-export type CustomNode = XYNode<CustomNodeData, "custom">;
+import type {
+  ConnectionData,
+  CustomNodeData,
+  CustomNode,
+} from "./CustomNode.types";
+export type { ConnectionData, CustomNodeData, CustomNode } from "./CustomNode.types";
+import { isInputHandleConnected, isOutputHandleConnected } from "./CustomNode.connections";
 
 export const CustomNode = React.memo(
   function CustomNode({ data, id, height, selected }: NodeProps<CustomNode>) {
@@ -255,7 +226,7 @@ export const CustomNode = React.memo(
               <NodeHandle
                 title={fieldTitle}
                 keyName={`${keyPrefix}${propKey}`}
-                isConnected={isOutputHandleConnected(propKey)}
+                isConnected={isOutputHandleConnected(data, id, propKey)}
                 schema={fieldSchema}
                 side="right"
               />
@@ -365,7 +336,7 @@ export const CustomNode = React.memo(
               !propKey.endsWith("_credentials") &&
               // For OUTPUT blocks, only show the 'value' (hides 'name') input connection handle
               !(nodeType == BlockUIType.OUTPUT && propKey == "name");
-            const isConnected = isInputHandleConnected(propKey);
+            const isConnected = isInputHandleConnected(data, id, propKey);
             return (
               !isHidden &&
               (isRequired || isAdvancedOpen || isConnected || !isAdvanced) && (
@@ -466,32 +437,6 @@ export const CustomNode = React.memo(
       },
       [data.hardcodedValues, id, setHardcodedValues, data.errors, setErrors],
     );
-
-    const isInputHandleConnected = (key: string) => {
-      return (
-        data.connections &&
-        data.connections.some((conn: any) => {
-          if (typeof conn === "string") {
-            const [_source, target] = conn.split(" -> ");
-            return target.includes(key) && target.includes(data.title);
-          }
-          return conn.target === id && conn.targetHandle === key;
-        })
-      );
-    };
-
-    const isOutputHandleConnected = (key: string) => {
-      return (
-        data.connections &&
-        data.connections.some((conn: any) => {
-          if (typeof conn === "string") {
-            const [source, _target] = conn.split(" -> ");
-            return source.includes(key) && source.includes(data.title);
-          }
-          return conn.source === id && conn.sourceHandle === key;
-        })
-      );
-    };
 
     const handleInputClick = useCallback(
       (key: string) => {

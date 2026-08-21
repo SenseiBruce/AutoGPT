@@ -10,6 +10,14 @@ BACKEND_ROOT = (
     / "backend"
     / "backend"
 )
+FRONTEND_API = (
+    Path(__file__).resolve().parents[1]
+    / "autogpt_platform"
+    / "frontend"
+    / "src"
+    / "lib"
+    / "autogpt-server-api"
+)
 
 
 def _line_count(path: Path) -> int:
@@ -29,6 +37,39 @@ def test_entrypoint_modules_are_small():
     assert _line_count(BACKEND_ROOT / "data/credit.py") < 120
     assert _line_count(BACKEND_ROOT / "server/v2/library/db.py") < 120
     assert _line_count(BACKEND_ROOT / "server/routers/v1.py") < 250
+    assert _line_count(FRONTEND_API / "client.ts") < 80
+    assert _line_count(FRONTEND_API / "types.ts") < 80
+
+
+def test_frontend_api_modules_under_500_loc():
+    """Buyer scanners flagged client.ts / types.ts as >1000 LOC god files."""
+    candidates = list(FRONTEND_API.glob("client*.ts")) + list(
+        FRONTEND_API.glob("types*.ts")
+    )
+    oversized = [
+        str(p.relative_to(FRONTEND_API))
+        for p in candidates
+        if _line_count(p) > 500
+    ]
+    assert oversized == [], f"frontend API files over 500 LOC: {oversized}"
+
+
+def test_frontend_api_barrels_reexport():
+    client = (FRONTEND_API / "client.ts").read_text(encoding="utf-8")
+    types = (FRONTEND_API / "types.ts").read_text(encoding="utf-8")
+    assert "BackendAPI" in client
+    assert "withUserApi" in client or "BackendAPIBase" in client
+    assert "types-block" in types
+    assert "types-agents" in types
+    assert (FRONTEND_API / "client-base.ts").is_file()
+    assert (FRONTEND_API / "client-user.ts").is_file()
+    assert (FRONTEND_API / "types-block.ts").is_file()
+    assert "getUserCredit" in (FRONTEND_API / "client-user.ts").read_text(
+        encoding="utf-8"
+    )
+    # Silent credit failures should not be masked
+    user = (FRONTEND_API / "client-user.ts").read_text(encoding="utf-8")
+    assert "Promise.resolve({ credits: 0 })" not in user
 
 
 def test_no_oversized_split_helpers():

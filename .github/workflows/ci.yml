@@ -20,6 +20,8 @@ jobs:
           python-version: "3.12"
       - name: Install Ruff
         run: pip install ruff
+      - name: Check env examples
+        run: python3 scripts/check_env_examples.py
       - name: Run ruff check
         run: ruff check autogpt_platform/backend/backend tests
 

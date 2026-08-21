@@ -15,6 +15,17 @@
 
 **AutoGPT** is a powerful platform that allows you to create, deploy, and manage continuous AI agents that automate complex workflows.
 
+## Architecture
+
+AutoGPT Platform is an **agent execution platform**, not a batch data pipeline. Runtime data flow:
+
+- **Postgres** (via Prisma) for graphs, executions, library, and store data
+- **RabbitMQ** for async notification and execution queues
+- **Redis** for caching and execution event fan-out
+- **FastAPI** backend + **Next.js** frontend for authoring and running agent graphs
+
+There is no dbt/Airflow/Dagster layer; SQL in-repo is operational (schema/roles), not analytics orchestration.
+
 ## Install, build, and test (fresh clone)
 
 These commands are the supported local path. They do not require the remote installer.

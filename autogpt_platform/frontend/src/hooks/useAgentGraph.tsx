@@ -31,6 +31,14 @@ import { useOnboarding } from "@/providers/onboarding/onboarding-provider";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGetV2ListLibraryAgentsQueryKey } from "@/app/api/__generated__/endpoints/library/library";
 
+import {
+  cleanupSourceName,
+  graphsEquivalent,
+  isToolSourceName,
+  normalizeToolName,
+  rebuildObjectUsingSchema,
+} from "./useAgentGraph.helpers";
+
 export default function useAgentGraph(
   flowID?: GraphID,
   flowVersion?: number,
@@ -270,12 +278,6 @@ export default function useAgentGraph(
 
   /** --- Smart Decision Maker Block helper functions --- */
 
-  const isToolSourceName = (sourceName: string) =>
-    sourceName.startsWith("tools_^_");
-
-  const cleanupSourceName = (sourceName: string) =>
-    isToolSourceName(sourceName) ? "tools" : sourceName;
-
   const getToolFuncName = useCallback(
     (nodeID: string) => {
       const sinkNode = xyNodes.find((node) => node.id === nodeID);
@@ -295,18 +297,6 @@ export default function useAgentGraph(
     [xyNodes, availableFlows],
   );
 
-  const normalizeToolName = (str: string) =>
-    str.replace(/[^a-zA-Z0-9_-]/g, "_").toLowerCase(); // This normalization rule has to match with the one on smart_decision_maker.py
-
-  /** ------------------------------ */
-
-  const updateEdgeBeads = useCallback(
-    (nodeExecUpdate: NodeExecutionResult) => {
-      setXYEdges((edges) =>
-        edges.map((edge): CustomEdge => {
-          if (edge.target !== getFrontendId(nodeExecUpdate.node_id, xyNodes)) {
-            // If the edge does not match the target node, skip it
-            return edge;
           }
 
           const execStatuses =
@@ -1005,70 +995,3 @@ export default function useAgentGraph(
   };
 }
 
-function graphsEquivalent(saved: Graph, current: GraphCreatable): boolean {
-  const sortNodes = (nodes: NodeCreatable[]) =>
-    nodes.toSorted((a, b) => a.id.localeCompare(b.id));
-
-  const sortLinks = (links: LinkCreatable[]) =>
-    links.toSorted(
-      (a, b) =>
-        8 * a.source_id.localeCompare(b.source_id) +
-        4 * a.sink_id.localeCompare(b.sink_id) +
-        2 * a.source_name.localeCompare(b.source_name) +
-        a.sink_name.localeCompare(b.sink_name),
-    );
-
-  const _saved = {
-    name: saved.name,
-    description: saved.description,
-    nodes: sortNodes(saved.nodes).map((v) => ({
-      block_id: v.block_id,
-      input_default: v.input_default,
-      metadata: v.metadata,
-    })),
-    links: sortLinks(saved.links).map((v) => ({
-      sink_name: v.sink_name,
-      source_name: v.source_name,
-    })),
-  };
-  const _current = {
-    name: current.name,
-    description: current.description,
-    nodes: sortNodes(current.nodes).map(({ id: _, ...rest }) => rest),
-    links: sortLinks(current.links).map(
-      ({ source_id: _, sink_id: __, ...rest }) => rest,
-    ),
-  };
-  return deepEquals(_saved, _current);
-}
-
-function rebuildObjectUsingSchema(
-  schema: BlockIOSubSchema,
-  object: { [key: string]: any },
-): Record<string, any> {
-  let inputData: Record<string, any> = {};
-
-  if ("properties" in schema) {
-    Object.keys(schema.properties).forEach((key) => {
-      if (object[key] !== undefined) {
-        if (
-          "properties" in schema.properties[key] ||
-          "additionalProperties" in schema.properties[key]
-        ) {
-          inputData[key] = rebuildObjectUsingSchema(
-            schema.properties[key],
-            object[key],
-          );
-        } else {
-          inputData[key] = object[key];
-        }
-      }
-    });
-  }
-
-  if ("additionalProperties" in schema) {
-    inputData = { ...inputData, ...object };
-  }
-
-  return inputData;
-}

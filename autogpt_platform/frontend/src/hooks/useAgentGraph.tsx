@@ -37,6 +37,7 @@ import {
   isToolSourceName,
   normalizeToolName,
   rebuildObjectUsingSchema,
+  reportLoadError,
 } from "./useAgentGraph.helpers";
 
 export default function useAgentGraph(
@@ -90,13 +91,13 @@ export default function useAgentGraph(
       .then((blocks) => {
         setAllBlocks(blocks);
       })
-      .catch();
+      .catch((error) => reportLoadError(toast, "Failed to load blocks", error));
 
     api
       .listGraphs()
       .then((flows) => setAvailableFlows(flows))
-      .catch();
-  }, [api]);
+      .catch((error) => reportLoadError(toast, "Failed to load graphs", error));
+  }, [api, toast]);
 
   // Subscribe to execution events
   useEffect(() => {

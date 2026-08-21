@@ -85,3 +85,12 @@ export function rebuildObjectUsingSchema(
 
   return inputData;
 }
+
+export function reportLoadError(
+  toast: (props: { title: string; variant?: string }) => void,
+  title: string,
+  error: unknown,
+): void {
+  console.error(title, error);
+  toast({ title, variant: "destructive" });
+}

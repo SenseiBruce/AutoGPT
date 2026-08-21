@@ -422,3 +422,35 @@ async def test_add_graph_execution_is_repeatable(mocker: MockerFixture):
     # Both executions should succeed (though they create different objects)
     assert result1 == mock_graph_exec
     assert result2 == mock_graph_exec_2
+
+
+def test_block_usage_cost_uses_matching_run_cost(mocker: MockerFixture):
+    from types import SimpleNamespace
+
+    from backend.data.block import BlockCostType
+    from backend.executor import utils_cost
+
+    fake_block = object()
+    cost = SimpleNamespace(
+        cost_filter={"model": "gpt"},
+        cost_type=BlockCostType.RUN,
+        cost_amount=7,
+    )
+    mocker.patch.object(
+        utils_cost,
+        "BLOCK_COSTS",
+        {type(fake_block): [cost]},
+    )
+
+    amount, filt = utils_cost.block_usage_cost(
+        fake_block, {"model": "gpt"}  # type: ignore[arg-type]
+    )
+    assert amount == 7
+    assert filt == {"model": "gpt"}
+
+
+def test_is_cost_filter_match_alias():
+    from backend.executor.utils import _is_cost_filter_match
+
+    assert _is_cost_filter_match({"a": 1}, {"a": 1, "b": 2})
+    assert not _is_cost_filter_match({"a": 1}, {"a": 2})

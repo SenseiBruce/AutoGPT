@@ -13,7 +13,7 @@ import { parseScheduleTimestamp } from "./client-helpers";
 import type { BackendAPIBase } from "./client-base";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Constructor<T = {}> = new (...args: any[]) => T;
+type Constructor<T = object> = new (...args: any[]) => T;
 
 export function withSchedulesApi<TBase extends Constructor<BackendAPIBase>>(Base: TBase) {
   return class extends Base {

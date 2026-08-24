@@ -64,3 +64,20 @@ export function extractRunsFromPages(
     }) || []
   );
 }
+
+export type RunStatusGroup = "all" | "failed" | "running" | "completed";
+
+const STATUS_GROUPS: Record<Exclude<RunStatusGroup, "all">, string[]> = {
+  failed: ["FAILED", "TERMINATED", "INCOMPLETE"],
+  running: ["RUNNING", "QUEUED"],
+  completed: ["COMPLETED"],
+};
+
+export function filterRunsByStatusGroup<T extends { status?: string }>(
+  runs: T[],
+  group: RunStatusGroup,
+): T[] {
+  if (group === "all") return runs;
+  const allowed = new Set(STATUS_GROUPS[group]);
+  return runs.filter((run) => allowed.has(String(run.status || "").toUpperCase()));
+}

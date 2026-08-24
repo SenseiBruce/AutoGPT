@@ -57,6 +57,7 @@ from backend.server.model import (
 from backend.util.cache import cached
 from backend.util.exceptions import GraphValidationError, NotFoundError
 from backend.util.json import dumps
+from backend.util.run_status_filter import resolve_run_status_filter
 
 
 class _V1Proxy:
@@ -406,12 +407,32 @@ async def list_graph_executions(
     page_size: int = Query(
         25, ge=1, le=100, description="Number of executions per page"
     ),
+    status_group: Optional[str] = Query(
+        None,
+        description="Preset filter: failed, running, completed, or all",
+    ),
+    statuses: Optional[list[str]] = Query(
+        None,
+        description=(
+            "Filter by execution status "
+            "(QUEUED, RUNNING, COMPLETED, FAILED, TERMINATED, INCOMPLETE)"
+        ),
+    ),
 ) -> v1.execution_db.GraphExecutionsPaginated:
+    status_values = resolve_run_status_filter(
+        status_group=status_group, statuses=statuses
+    )
+    parsed_statuses = (
+        [v1.execution_db.ExecutionStatus(value) for value in status_values]
+        if status_values
+        else None
+    )
     return await v1.execution_db.get_graph_executions_paginated(
         graph_id=graph_id,
         user_id=user_id,
         page=page,
         page_size=page_size,
+        statuses=parsed_statuses,
     )
 
 

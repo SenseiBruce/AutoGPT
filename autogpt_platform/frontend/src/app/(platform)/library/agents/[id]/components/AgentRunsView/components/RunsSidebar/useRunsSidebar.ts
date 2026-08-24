@@ -12,6 +12,8 @@ import {
   computeRunsCount,
   getNextRunsPageParam,
   extractRunsFromPages,
+  filterRunsByStatusGroup,
+  type RunStatusGroup,
 } from "./helpers";
 
 type Args = {
@@ -28,6 +30,7 @@ export function useRunsSidebar({ graphId, onSelectRun, onCountsChange }: Args) {
   const params = useSearchParams();
   const existingRunId = params.get("executionId") as string | undefined;
   const [tabValue, setTabValue] = useState<"runs" | "scheduled">("runs");
+  const [statusGroup, setStatusGroup] = useState<RunStatusGroup>("all");
 
   const runsQuery = useGetV1ListGraphExecutionsInfinite(
     graphId || "",
@@ -57,6 +60,11 @@ export function useRunsSidebar({ graphId, onSelectRun, onCountsChange }: Args) {
   const runs = useMemo(
     () => extractRunsFromPages(runsQuery.data),
     [runsQuery.data],
+  );
+
+  const visibleRuns = useMemo(
+    () => filterRunsByStatusGroup(runs, statusGroup),
+    [runs, statusGroup],
   );
 
   const schedules = schedulesQuery.data || [];
@@ -95,7 +103,10 @@ export function useRunsSidebar({ graphId, onSelectRun, onCountsChange }: Args) {
   }, [existingRunId, runs.length, schedules, onSelectRun]);
 
   return {
-    runs,
+    runs: visibleRuns,
+    allRunsCount: runs.length,
+    statusGroup,
+    setStatusGroup,
     schedules,
     error: schedulesQuery.error || runsQuery.error,
     loading,

@@ -1,6 +1,7 @@
 """Execution event bus and share helpers."""
 
 import logging
+from collections import defaultdict
 from datetime import datetime, timezone
 from enum import Enum
 from multiprocessing import Manager
@@ -31,7 +32,7 @@ from backend.util.retry import func_retry
 from backend.util.settings import Config
 from backend.util.truncate import truncate
 
-from .block import BlockInput, get_block
+from .block import BlockInput, BlockType, CompletedBlockOutput, get_block
 from .db import BaseDbModel, query_raw_with_schema
 from .event_bus import AsyncRedisEventBus, RedisEventBus
 from .execution_models import (

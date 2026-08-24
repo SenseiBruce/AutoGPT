@@ -8,6 +8,7 @@ import type { BackendAPIBase } from "./client-base";
 import {
   parseGraphExecutionTimestamps,
   parseNodeExecutionResultTimestamps,
+  type WebsocketMessage,
   type WebsocketMessageTypeMap,
 } from "./client-helpers";
 
@@ -275,8 +276,5 @@ export function withWebSocketApi<TBase extends Constructor<BackendAPIBase>>(Base
           this.heartbeatTimeoutID = null;
         }
       }
-    }
-
-    }
-  };
+    };
 }

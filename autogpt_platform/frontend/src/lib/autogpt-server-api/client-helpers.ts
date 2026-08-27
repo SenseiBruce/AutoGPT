@@ -17,7 +17,7 @@ export type GraphCreateRequestBody = {
   graph: GraphCreatable;
 };
 
-export export type WebsocketMessageTypeMap = {
+export type WebsocketMessageTypeMap = {
   subscribe_graph_execution: { graph_exec_id: GraphExecutionID };
   subscribe_graph_executions: { graph_id: GraphID };
   graph_execution_event: GraphExecution;

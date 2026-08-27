@@ -15,6 +15,8 @@ import type { GraphExecutionJobInfo } from "@/app/api/__generated__/models/graph
 import { InfiniteList } from "@/components/molecules/InfiniteList/InfiniteList";
 import { ErrorCard } from "@/components/molecules/ErrorCard/ErrorCard";
 import { Skeleton } from "@/components/__legacy__/ui/skeleton";
+import { cn } from "@/lib/utils";
+import type { RunStatusGroup } from "./helpers";
 
 interface RunsSidebarProps {
   agent: LibraryAgent;
@@ -45,6 +47,8 @@ export function RunsSidebar({
     isFetchingMoreRuns,
     tabValue,
     setTabValue,
+    statusGroup,
+    setStatusGroup,
   } = useRunsSidebar({
     graphId: agent.graph_id,
     onSelectRun,
@@ -91,24 +95,35 @@ export function RunsSidebar({
 
       <>
         <TabsLineContent value="runs">
-          <InfiniteList
-            items={runs}
-            hasMore={!!hasMoreRuns}
-            isFetchingMore={isFetchingMoreRuns}
-            onEndReached={fetchMoreRuns}
-            className="flex flex-nowrap items-center justify-start gap-4 overflow-x-scroll px-1 pb-4 pt-1 lg:flex-col lg:gap-3 lg:overflow-x-hidden"
-            itemWrapperClassName="w-auto lg:w-full"
-            renderItem={(run) => (
-              <div className="w-[15rem] lg:w-full">
-                <RunListItem
-                  run={run}
-                  title={agent.name}
-                  selected={selectedRunId === run.id}
-                  onClick={() => onSelectRun && onSelectRun(run.id)}
-                />
-              </div>
-            )}
+          <RunStatusFilterBar
+            value={statusGroup}
+            onChange={setStatusGroup}
+            matchCount={runs.length}
           />
+          {runs.length === 0 ? (
+            <p className="px-1 py-3 text-sm text-zinc-500">
+              No runs match this filter.
+            </p>
+          ) : (
+            <InfiniteList
+              items={runs}
+              hasMore={!!hasMoreRuns}
+              isFetchingMore={isFetchingMoreRuns}
+              onEndReached={fetchMoreRuns}
+              className="flex flex-nowrap items-center justify-start gap-4 overflow-x-scroll px-1 pb-4 pt-1 lg:flex-col lg:gap-3 lg:overflow-x-hidden"
+              itemWrapperClassName="w-auto lg:w-full"
+              renderItem={(run) => (
+                <div className="w-[15rem] lg:w-full">
+                  <RunListItem
+                    run={run}
+                    title={agent.name}
+                    selected={selectedRunId === run.id}
+                    onClick={() => onSelectRun && onSelectRun(run.id)}
+                  />
+                </div>
+              )}
+            />
+          )}
         </TabsLineContent>
         <TabsLineContent value="scheduled">
           <div className="flex flex-nowrap items-center justify-start gap-4 overflow-x-scroll px-1 pb-4 pt-1 lg:flex-col lg:gap-3 lg:overflow-x-hidden">
@@ -125,5 +140,49 @@ export function RunsSidebar({
         </TabsLineContent>
       </>
     </TabsLine>
+  );
+}
+
+const STATUS_FILTERS: Array<{ id: RunStatusGroup; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "failed", label: "Failed" },
+  { id: "running", label: "Running" },
+  { id: "completed", label: "Done" },
+];
+
+function RunStatusFilterBar({
+  value,
+  onChange,
+  matchCount,
+}: {
+  value: RunStatusGroup;
+  onChange: (group: RunStatusGroup) => void;
+  matchCount: number;
+}) {
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-1.5 px-1 pt-1">
+      {STATUS_FILTERS.map((filter) => {
+        const selected = value === filter.id;
+        return (
+          <button
+            key={filter.id}
+            type="button"
+            onClick={() => onChange(filter.id)}
+            className={cn(
+              "rounded-full px-2.5 py-1 text-xs font-medium transition-colors",
+              selected
+                ? "bg-zinc-800 text-white"
+                : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200",
+            )}
+            aria-pressed={selected}
+          >
+            {filter.label}
+          </button>
+        );
+      })}
+      {value !== "all" ? (
+        <span className="ml-1 text-xs text-zinc-500">{matchCount} matching</span>
+      ) : null}
+    </div>
   );
 }
